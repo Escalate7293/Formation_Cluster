@@ -14,6 +14,9 @@ from astropy.stats import SigmaClip,sigma_clip
 from matplotlib.colors import LogNorm,PowerNorm
 from matplotlib.patches import Ellipse,Rectangle,Circle
 from sedcreator import SedFluxer
+import matplotlib.image as mpimg
+import os
+import pandas as pd
 
 # 引入你的基础类和相关辅助函数 (假设在此同一目录下)
 from .Formation_Cluster import Formation_Cluster, create_cutout_from_coords, casa_imfit_manually, replace_fits_data
@@ -49,34 +52,6 @@ class BatchImfitter:
         self.results_dir = os.path.join(self.output_dir, "results")
         os.makedirs(self.cutout_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
-
-    def _sum_flux_sedfluxer(self, working_dir, instance_this, ra_center, dec_center):
-        """内部测光辅助函数: 寻找 CASA fit 日志并依靠 SedFluxer 测光"""
-        try:
-            fitlog_summary_file = os.path.join(working_dir, "fit_summary_log.dat")
-            if not os.path.exists(fitlog_summary_file):
-                raise FileNotFoundError(f"Fit summary missing: {fitlog_summary_file}")
-                
-            df = pd.read_csv(fitlog_summary_file, index_col=False, header=0, delim_whitespace=True, skiprows=1)
-            if df.empty:
-                raise ValueError("Fit summary is empty.")
-                
-            fitlog_data = df.shift(axis=1) 
-            ra_center_fit = fitlog_data["LongICRS"][0]
-            dec_center_fit = fitlog_data["LatICRS"][0]
-                        
-            fwhm_pix = (np.sqrt(fitlog_data["ConMaj"][0] * fitlog_data["ConMin"][0]) / instance_this.PIXEL_SCALE.value)
-            sigma_pix = fwhm_pix / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-            
-            central_coords = SkyCoord(ra=ra_center_fit*u.deg, dec=dec_center_fit*u.deg, frame='icrs')
-            fluxer = SedFluxer(instance_this.hdu[0])
-            aper_rad = 3 * sigma_pix * instance_this.PIXEL_SCALE.value # 3 sigma circle
-            
-            flux_obj = fluxer.get_flux(central_coords, aper_rad, aper_rad, aper_rad*2)
-            return flux_obj.flux_bkgsub, flux_obj.fluc_error, fitlog_data
-        except Exception as e:
-            # 静默返回 None，表示拟合未正确收敛产生数据
-            return None, None, None
 
     def run_pipeline(self, 
                      clustername,
@@ -138,6 +113,8 @@ class BatchImfitter:
             # --- 建立独立切图目录 ---
             output_dir_src = os.path.join(self.cutout_dir, f"source_{i+1}")
             os.makedirs(output_dir_src, exist_ok=True)
+            output_dir_result_src = os.path.join(self.results_dir, f"source_{i+1}")
+            os.makedirs(output_dir_result_src, exist_ok=True)
             
             save_path_norm = os.path.join(output_dir_src, f"cutout_norm.fits")
 
@@ -213,7 +190,7 @@ class BatchImfitter:
                         manual_estimate=None, show_fitting_result=show_plots, zero_level=True,
                         box_set=box_small,
                         show_one_dim_result=show_plots, idx=peak_y, idy=peak_x,
-                        RMS=std_val, savepath=self.results_dir,
+                        RMS=std_val, savepath=output_dir_result_src, #self.results_dir,
                         fig_basename=clustername + f'_source_{i+1}_raw_{suffix_name}'
                     )
 
@@ -261,7 +238,7 @@ class BatchImfitter:
                             manual_estimate=None, show_fitting_result=show_plots, zero_level=True,
                             box_set=box_large,  # <--- Change here
                             show_one_dim_result=show_plots, idx=peak_y, idy=peak_x,
-                            RMS=std_val, savepath=self.results_dir,
+                            RMS=std_val, savepath=output_dir_result_src, #self.results_dir,
                             fig_basename=clustername + f'_source_{i+1}_raw_{suffix_name}'
                         )
 
@@ -462,10 +439,11 @@ class BatchImfitter:
                     plt.tight_layout()
 
                     # --- 保存合并后的图像 ---
-                    if self.results_dir is not None:
+                    # if self.results_dir is not None:
+                    if output_dir_result_src is not None:
                         # 针对不同模式命名
                         save_name = clustername + f'_source_{i+1}_maskbg_normal_rbm05.png' if has_rbm05 else clustername + f'_source_{i+1}_maskbg_normal.png'
-                        save_full_path = os.path.join(self.results_dir, save_name)
+                        save_full_path = os.path.join(output_dir_result_src, save_name)
                         fig.savefig(save_full_path, dpi=300, bbox_inches='tight')
 
                 replace_file_path_normal = save_path_norm.replace('.fits','_bgmap.fits')
@@ -493,7 +471,7 @@ class BatchImfitter:
                         show_fitting_result=show_plots,
                         show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
                         RMS=std_normal,
-                        savepath=self.results_dir,
+                        savepath=output_dir_result_src, #self.results_dir,
                         fig_basename=clustername + f'_source_{i+1}_maskbg_sub_normal'
                     )
                 except Exception as e:
@@ -505,7 +483,7 @@ class BatchImfitter:
                         show_fitting_result=show_plots,
                         show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
                         RMS=std_normal,
-                        savepath=self.results_dir,
+                        savepath=output_dir_result_src, #self.results_dir,
                         fig_basename=clustername + f'_source_{i+1}_maskbg_sub_normal'
                     )
 
@@ -524,7 +502,7 @@ class BatchImfitter:
                             show_fitting_result=show_plots,
                             show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
                             RMS=std_rbm05,
-                            savepath=self.results_dir,
+                            savepath=output_dir_result_src, #self.results_dir,
                             fig_basename=clustername + f'_source_{i+1}_maskbg_sub_rbm05'
                         )
                     except Exception as e:
@@ -536,8 +514,256 @@ class BatchImfitter:
                             show_fitting_result=show_plots,
                             show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
                             RMS=std_rbm05,
-                            savepath=self.results_dir,
+                            savepath=output_dir_result_src, #self.results_dir,
                             fig_basename=clustername + f'_source_{i+1}_maskbg_sub_rbm05'
                         )
 
                     results['IMFIT_logs_rbm05'].append(log_rbm05)
+            
+            else: # 环境简单，直接标记并记录 SNR 和 Flux，跳过复杂的拟合和背景处理
+                sim_cen_x_pix, sim_cen_y_pix = fc_norm.wcs.celestial.all_world2pix(ra, dec, 0)
+                sim_cen_x_pix, sim_cen_y_pix = int(sim_cen_x_pix), int(sim_cen_y_pix)
+                
+                # 在中心 10x10 区域找最大值
+                img_vicinity = fc_norm.img[sim_cen_y_pix-5:sim_cen_y_pix+5, sim_cen_x_pix-5:sim_cen_x_pix+5]
+                Ipeak = img_vicinity.max()
+                
+                # 获取 Peak 的像素坐标 (相对于 Vicinity)
+                dec_peak_local, ra_peak_local = np.where(img_vicinity == Ipeak)
+                
+                # 转换为全局像素坐标
+                ra_peak_pix_global = ra_peak_local[0] + (sim_cen_x_pix - 5)
+                dec_peak_pix_global = dec_peak_local[0] + (sim_cen_y_pix - 5)
+                
+                # 转换为世界坐标 (RA/DEC)
+                ra_peak, dec_peak = fc_norm.wcs.celestial.all_pix2world(ra_peak_pix_global, dec_peak_pix_global, 0)
+                
+                # 记录 SNR (基于 Normal)
+                snr_this = Ipeak / std_normal
+                # source_snr_array[idx] = snr_this
+                results['SNR_normal'][i] = snr_this
+
+                # ... (前文：获取 sim_cen_x_pix, 计算 Ipeak, ra_peak, dec_peak 等逻辑保持不变) ...
+                # ... (前文：计算 snr_this, source_snr_array[idx] = snr_this) ...
+
+                # 计算在 Cutout 中的像素坐标 (Normal 和 Rmb05 的 WCS 和尺寸一致，统一使用 Normal 的坐标)
+                ra_peak_pix_cutout, dec_peak_pix_cutout = cutout_normal.wcs.celestial.all_world2pix(ra_peak, dec_peak, 0)  
+                ra_peak_pix_cutout = int(ra_peak_pix_cutout)
+                dec_peak_pix_cutout = int(dec_peak_pix_cutout)
+
+                if snr_this <= snr_threshold:
+                    aaa_cutout = Formation_Cluster(save_path_norm)
+                    ra_peak_pix_cutout, dec_peak_pix_cutout = aaa_cutout.wcs.celestial.all_world2pix(ra_peak, dec_peak, 0)  
+                    ra_peak_pix_cutout = int(ra_peak_pix_cutout)
+                    dec_peak_pix_cutout = int(dec_peak_pix_cutout)
+                    
+                    log_normal = casa_imfit_manually(
+                        save_path_norm,
+                        fc_norm,
+                        manual_estimate=None,
+                        show_fitting_result=show_plots,
+                        # zero_level=True,
+                        box_set=f'{ra_peak_pix_cutout-10},{dec_peak_pix_cutout-10},{ra_peak_pix_cutout+10},{dec_peak_pix_cutout+10}',
+                        show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
+                        RMS=std_normal,
+                        fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak, point_source=False,
+                        savepath=output_dir_result_src,
+                        fig_basename=clustername + f'_source_{i+1}_low_snr_normal'
+                    )
+                    
+                    if has_rbm05:
+                        log_rbm05 = casa_imfit_manually(
+                            save_path_rbm05,
+                            fc_rbm05,
+                            manual_estimate=None,
+                            show_fitting_result=show_plots,
+                            # zero_level=True,
+                            box_set=f'{ra_peak_pix_cutout-10},{dec_peak_pix_cutout-10},{ra_peak_pix_cutout+10},{dec_peak_pix_cutout+10}',
+                            show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
+                            RMS=std_rbm05,
+                            fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak, point_source=False,
+                            savepath=output_dir_result_src,
+                            fig_basename=clustername + f'_source_{i+1}_low_snr_rbm05'
+                        )
+
+                else:
+                    log_normal = casa_imfit_manually(
+                        save_path_norm,
+                        fc_norm,
+                        manual_estimate=None,
+                        show_fitting_result=show_plots,
+                        # zero_level=True,
+                        box_set='30,30,70,70',
+                        # box_set=f'{ra_peak_pix_cutout-5},{dec_peak_pix_cutout-5},{ra_peak_pix_cutout+5},{dec_peak_pix_cutout+5}',
+                        show_one_dim_result=show_plots, idx=50, idy=50,
+                        RMS=std_normal,
+                        # fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak
+                        savepath=output_dir_result_src, #self.results_dir,
+                        fig_basename=clustername + f'_source_{i+1}_high_snr_normal'
+                    )
+                    
+                    if has_rbm05:
+                        log_rbm05 = casa_imfit_manually(
+                            save_path_rbm05,
+                            fc_rbm05,
+                            manual_estimate=None,
+                            show_fitting_result=show_plots,
+                            # zero_level=True,
+                            box_set='30,30,70,70',
+                            # box_set=f'{ra_peak_pix_cutout-5},{dec_peak_pix_cutout-5},{ra_peak_pix_cutout+5},{dec_peak_pix_cutout+5}',
+                            show_one_dim_result=show_plots, idx=50, idy=50,
+                            RMS=std_rbm05,
+                            # fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak
+                            savepath=output_dir_result_src, #self.results_dir,
+                            fig_basename=clustername + f'_source_{i+1}_high_snr_rbm05'
+                        )
+
+                def sum_flux_sedfluxer(save_path_this, instance_this, sum_flux_array, sum_flux_err_array, idx):
+                    working_dir = save_path_this.replace('.fits','')
+                    fitlog_file = os.path.join(working_dir, "fit_log.dat")
+                    fitlog_summary_file = os.path.join(working_dir, "fit_summary_log.dat")
+
+                    df = pd.read_csv(fitlog_summary_file, index_col=False, header=0, delim_whitespace=True, skiprows=1)
+                    fitlog_data = df.shift(axis=1) # 保持原代码逻辑
+                    ra_center_fit = fitlog_data["LongICRS"][0]
+                    dec_center_fit = fitlog_data["LatICRS"][0]
+                                
+                    fwhm_pix = (np.sqrt(fitlog_data["ConMaj"][0] * fitlog_data["ConMin"][0]) / instance_this.PIXEL_SCALE.value)
+                    sigma_pix = fwhm_pix / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+
+                    central_coords = SkyCoord(ra=ra_center_fit*u.deg, dec=dec_center_fit*u.deg, frame='icrs')
+                    fluxer = SedFluxer(instance_this.hdu[0])
+                    aper_rad = 3 * sigma_pix * instance_this.PIXEL_SCALE.value # 3 sigma circle
+                    
+                    flux_obj = fluxer.get_flux(central_coords, aper_rad, aper_rad, aper_rad*2)
+                    if show_plots:
+                        flux_obj.plot(cmap='jet') # 原代码写死 jet
+                        
+                    # sum_flux_array[idx] = flux_obj.flux_bkgsub # 注意使用 idx
+                    # sum_flux_err_array[idx] = flux_obj.fluc_error
+                    sum_flux_array[idx] = flux_obj.flux_bkgsub # 注意使用 idx
+                    sum_flux_err_array[idx] = flux_obj.fluc_error
+                    return None
+                
+                sum_flux_sedfluxer(save_path_norm, fc_norm, results['Sum_Flux_normal'], results['Sum_Flux_err_normal'], i)
+                if has_rbm05:
+                    sum_flux_sedfluxer(save_path_rbm05, fc_rbm05, results['Sum_Flux_rbm05'], results['Sum_Flux_err_rbm05'], i)
+
+                # sum_bool_array[idx] = 1
+                results['LOCAL_complex_bool'][i] = 0  # 标记为背景简单
+                results['LOCAL_mad_std'][i] = std_surrounding_normal  # 以normal的背景为标准
+                results['IMFIT_logs_norm'].append(log_normal)
+
+                if has_rbm05:
+                    results['IMFIT_logs_rbm05'].append(log_rbm05)
+
+        plt.close('all')
+        self.results = results  # 将结果保存在实例属性中，方便后续访问
+        return results
+
+    def save_results_to_csv(self, output_dir=None):
+        """
+        Saves the processed results from the pipeline into CSV files.
+        Separates into normal and rbm05 tables if both exist.
+        """
+        
+        if not hasattr(self, 'results') or not self.results:
+            print("No results found. Run pipeline first.")
+            return
+
+        out_dir = output_dir if output_dir else self.output_dir
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # 提取共有属性
+        base_data = {
+            'Source_Index': range(1, len(self.results['RA']) + 1),
+            'Raw_RA': self.results['RA'],
+            'Raw_DEC': self.results['DEC'],
+            'LOCAL_complex_bool': self.results['LOCAL_complex_bool'],
+            'LOCAL_mad_std': self.results['LOCAL_mad_std'],
+            'SNR_normal': self.results['SNR_normal'],
+        }
+        
+        # 构建 normal 表格数据
+        norm_data = base_data.copy()
+        norm_data['Sum_Flux'] = self.results['Sum_Flux_normal']
+        norm_data['Sum_Flux_err'] = self.results['Sum_Flux_err_normal']
+        norm_data['Imfit_Flux'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+        norm_data['Imfit_Flux_err'] = np.zeros(len(self.results['RA']))
+        norm_data['Peak_Intensity'] = np.zeros(len(self.results['RA']))
+        norm_data['Peak_Intensity_err'] = np.zeros(len(self.results['RA']))
+        norm_data['deconmajFWHM'] = np.zeros(len(self.results['RA']))
+        norm_data['deconmajFWHM_err'] = np.zeros(len(self.results['RA']))
+        norm_data['deconminFWHM'] = np.zeros(len(self.results['RA']))
+        norm_data['deconminFWHM_err'] = np.zeros(len(self.results['RA']))
+        norm_data['deconPA'] = np.zeros(len(self.results['RA']))
+        norm_data['deconPA_err'] = np.zeros(len(self.results['RA']))
+        norm_data['imfit_ra'] = np.zeros(len(self.results['RA']))
+        norm_data['imfit_ra_err'] = np.zeros(len(self.results['RA']))
+        norm_data['imfit_dec'] = np.zeros(len(self.results['RA']))
+        norm_data['imfit_dec_err'] = np.zeros(len(self.results['RA']))
+
+        for index, log in enumerate(self.results['IMFIT_logs_norm']):
+            row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+            norm_data['Imfit_Flux'][index] = row['I']
+            norm_data['Imfit_Flux_err'][index] = row['Ierr']
+            norm_data['Peak_Intensity'][index] = row['Peak']
+            norm_data['Peak_Intensity_err'][index] = row['PeakErr']
+            norm_data['deconmajFWHM'][index] = row['DeconMaj']
+            norm_data['deconmajFWHM_err'][index] = row['DeconMajErr']
+            norm_data['deconminFWHM'][index] = row['DeconMin']
+            norm_data['deconminFWHM_err'][index] = row['DeconMinErr']
+            norm_data['deconPA'][index] = row['DeconPA']
+            norm_data['deconPA_err'][index] = row['DeconPAErr']
+            norm_data['imfit_ra'][index] = row['LongICRS']
+            norm_data['imfit_ra_err'][index] = row['LongICRSerr']
+            norm_data['imfit_dec'][index] = row['LatICRS']
+            norm_data['imfit_dec_err'][index] = row['LatICRSerr']
+
+        df_normal = pd.DataFrame(norm_data)
+        csv_path_norm = os.path.join(out_dir, f"{self.cluster_name}_results_normal.csv")
+        df_normal.to_csv(csv_path_norm, index=False)
+        print(f"Normal results saved to: {csv_path_norm}")
+        
+        # 若存在 rbm05 数据，构建 rbm05 表格
+        if 'Sum_Flux_rbm05' in self.results and any(x is not None for x in self.results['Sum_Flux_rbm05']):
+            rbm05_data = base_data.copy()
+            rbm05_data['Sum_Flux'] = self.results['Sum_Flux_rbm05']
+            rbm05_data['Sum_Flux_err'] = self.results['Sum_Flux_err_rbm05']
+            rbm05_data['Imfit_Flux'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['Imfit_Flux_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['Peak_Intensity'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['Peak_Intensity_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['deconmajFWHM'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['deconmajFWHM_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['deconminFWHM'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['deconminFWHM_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['deconPA'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['deconPA_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['imfit_ra'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['imfit_ra_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['imfit_dec'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
+            rbm05_data['imfit_dec_err'] = np.zeros(len(self.results['RA']))
+
+            for index, log in enumerate(self.results['IMFIT_logs_rbm05']):
+                row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+                rbm05_data['Imfit_Flux'][index] = row['I']
+                rbm05_data['Imfit_Flux_err'][index] = row['Ierr']
+                rbm05_data['Peak_Intensity'][index] = row['Peak']
+                rbm05_data['Peak_Intensity_err'][index] = row['PeakErr']
+                rbm05_data['deconmajFWHM'][index] = row['DeconMaj']
+                rbm05_data['deconmajFWHM_err'][index] = row['DeconMajErr']
+                rbm05_data['deconminFWHM'][index] = row['DeconMin']
+                rbm05_data['deconminFWHM_err'][index] = row['DeconMinErr']
+                rbm05_data['deconPA'][index] = row['DeconPA']
+                rbm05_data['deconPA_err'][index] = row['DeconPAErr']
+                rbm05_data['imfit_ra'][index] = row['LongICRS']
+                rbm05_data['imfit_ra_err'][index] = row['LongICRSerr']
+                rbm05_data['imfit_dec'][index] = row['LatICRS']
+                rbm05_data['imfit_dec_err'][index] = row['LatICRSerr']
+            
+            df_rbm05 = pd.DataFrame(rbm05_data)
+                
+            csv_path_rbm05 = os.path.join(out_dir, f"{self.cluster_name}_results_rbm05.csv")
+            df_rbm05.to_csv(csv_path_rbm05, index=False)
+            print(f"RBM05 results saved to: {csv_path_rbm05}")
