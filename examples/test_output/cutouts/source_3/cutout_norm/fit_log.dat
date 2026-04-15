@@ -1,0 +1,49 @@
+****** Fit performed at Wed Apr 15 08:06:44 2026******
+
+Input parameters ---
+       --- imagename:           /home/esker7293/Cluster_formation/class_test/test_output3/cutouts/source_3/cutout_norm/casa_img
+       --- region:              
+       --- channel:             0
+       --- stokes:              I
+       --- mask:                
+       --- include pixel range: []
+       --- exclude pixel range: []
+       --- initial estimates:   Peak, X, Y, a, b, PA
+                                0.0002781007206067443, 49.00000000016553, 47.99999999887427, 0.0834893286228arcsec, 0.063701778650292arcsec, 78.66580963135deg, xy
+*** Details of fit for channel number 0
+Number of pixels used in fit: 441
+Input and residual image statistics (to be used as a rough guide only as to goodness of fit)
+       --- Standard deviation of input image: 7.29315e-05 Jy
+       --- Standard deviation of residual image: 2.22996e-05 Jy
+       --- RMS of input image: 8.95486e-05 Jy
+       --- RMS of residual image: 2.34167e-05 Jy
+
+Fit on casa_img component 0
+Position ---
+       --- ra:    16:52:04.203 (fixed)
+       --- dec: - 46.08.27.40 (fixed)
+       --- ra:  49.000 (fixed)
+       --- dec: 48.000 (fixed)
+
+Image component size (convolved with beam) ---
+       --- major axis FWHM:     101.6 +/- 10.3 marcsec
+       --- minor axis FWHM:     76.3 +/- 6.1 marcsec
+       --- position angle: 59 +/- 11 deg
+
+Clean beam size ---
+       --- major axis FWHM: 0.08 arcsec
+       --- minor axis FWHM: 0.06 arcsec
+       --- position angle: 78.67 deg
+Image component size (deconvolved from beam) ---
+       --- major axis FWHM:     63 +/- 23 marcsec
+       --- minor axis FWHM:     33 +/- 18 marcsec
+       --- position angle: 39 +/- 41 deg
+
+Flux ---
+       --- Integrated:   401 +/- 56 uJy
+       --- Peak:         275 +/- 25 uJy/beam
+       --- Polarization: I
+
+Spectrum ---
+      --- frequency:        258.3143 GHz (1.160572 mm)
+
