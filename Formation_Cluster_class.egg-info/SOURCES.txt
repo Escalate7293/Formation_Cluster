@@ -1,6 +1,7 @@
 setup.py
 Formation_Cluster_class/Formation_Cluster.py
 Formation_Cluster_class/__init__.py
+Formation_Cluster_class/batch_imfitter.py
 Formation_Cluster_class.egg-info/PKG-INFO
 Formation_Cluster_class.egg-info/SOURCES.txt
 Formation_Cluster_class.egg-info/dependency_links.txt
