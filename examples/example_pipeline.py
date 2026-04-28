@@ -12,8 +12,8 @@ def main():
     # 如果你要测其他源，请在这里替换为正确的 fits 文件绝对路径
     # ==========================================
     # 注意：运行前请确保把这些路径改成真实存在的文件
-    test_fits_normal = "/home/esker7293/Cluster_formation/Hotdisk/continuum_detailed/G339.Band6.cycle7.contin.selfcal.image.tt0.fits" # 请修改为真实存在的文件
-    test_fits_rbm05 = "/home/esker7293/Cluster_formation/Hotdisk/continuum_detailed/G339.Band6.cycle7.contin.selfcal.robust-0.5.image.tt0.fits" # 请修改为真实存在的文件
+    test_fits_normal = "/home/esker7293/Cluster_formation/Formation_Cluster/examples/G339.Band6.cycle7.contin.selfcal.image.tt0.fits" # 请修改为真实存在的文件
+    test_fits_rbm05 = "/home/esker7293/Cluster_formation/Formation_Cluster/examples/G339.Band6.cycle7.contin.selfcal.robust-0.5.image.tt0.fits" # 请修改为真实存在的文件
     test_csv_path = os.path.join(os.path.dirname(__file__), "g339_b6_c7_venn_sources_v2_less.csv")
     output_directory = os.path.join(os.path.dirname(__file__), "test_output")
 

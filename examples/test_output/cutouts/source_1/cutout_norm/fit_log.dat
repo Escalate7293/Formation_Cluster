@@ -1,7 +1,7 @@
-****** Fit performed at Wed Apr 15 08:03:53 2026******
+****** Fit performed at Mon Apr 27 12:34:55 2026******
 
 Input parameters ---
-       --- imagename:           /home/esker7293/Cluster_formation/class_test/test_output3/cutouts/source_1/cutout_norm/casa_img
+       --- imagename:           /home/esker7293/Cluster_formation/Formation_Cluster/examples/test_output/cutouts/source_1/cutout_norm/casa_img
        --- region:              
        --- channel:             0
        --- stokes:              I

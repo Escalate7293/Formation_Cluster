@@ -557,34 +557,41 @@ class BatchImfitter:
                     ra_peak_pix_cutout = int(ra_peak_pix_cutout)
                     dec_peak_pix_cutout = int(dec_peak_pix_cutout)
                     
-                    log_normal = casa_imfit_manually(
-                        save_path_norm,
-                        fc_norm,
-                        manual_estimate=None,
-                        show_fitting_result=show_plots,
-                        # zero_level=True,
-                        box_set=f'{ra_peak_pix_cutout-10},{dec_peak_pix_cutout-10},{ra_peak_pix_cutout+10},{dec_peak_pix_cutout+10}',
-                        show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
-                        RMS=std_normal,
-                        fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak, point_source=False,
-                        savepath=output_dir_result_src,
-                        fig_basename=clustername + f'_source_{i+1}_low_snr_normal'
-                    )
-                    
-                    if has_rbm05:
-                        log_rbm05 = casa_imfit_manually(
-                            save_path_rbm05,
-                            fc_rbm05,
+                    try:
+                        log_normal = casa_imfit_manually(
+                            save_path_norm,
+                            fc_norm,
                             manual_estimate=None,
                             show_fitting_result=show_plots,
                             # zero_level=True,
                             box_set=f'{ra_peak_pix_cutout-10},{dec_peak_pix_cutout-10},{ra_peak_pix_cutout+10},{dec_peak_pix_cutout+10}',
                             show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
-                            RMS=std_rbm05,
+                            RMS=std_normal,
                             fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak, point_source=False,
                             savepath=output_dir_result_src,
-                            fig_basename=clustername + f'_source_{i+1}_low_snr_rbm05'
+                            fig_basename=clustername + f'_source_{i+1}_low_snr_normal'
                         )
+                    except:
+                        # 如果拟合失败，返回空日志
+                        log_normal = None
+                    
+                    if has_rbm05:
+                        try:
+                            log_rbm05 = casa_imfit_manually(
+                                save_path_rbm05,
+                                fc_rbm05,
+                                manual_estimate=None,
+                                show_fitting_result=show_plots,
+                                # zero_level=True,
+                                box_set=f'{ra_peak_pix_cutout-10},{dec_peak_pix_cutout-10},{ra_peak_pix_cutout+10},{dec_peak_pix_cutout+10}',
+                                show_one_dim_result=show_plots, idx=dec_peak_pix_cutout, idy=ra_peak_pix_cutout,
+                                RMS=std_rbm05,
+                                fcen_ra=ra_peak, fcen_dec=dec_peak, Ipeak=Ipeak, point_source=False,
+                                savepath=output_dir_result_src,
+                                fig_basename=clustername + f'_source_{i+1}_low_snr_rbm05'
+                            )
+                        except:
+                            log_rbm05 = None
 
                 else:
                     log_normal = casa_imfit_manually(
@@ -702,23 +709,29 @@ class BatchImfitter:
         norm_data['imfit_ra_err'] = np.zeros(len(self.results['RA']))
         norm_data['imfit_dec'] = np.zeros(len(self.results['RA']))
         norm_data['imfit_dec_err'] = np.zeros(len(self.results['RA']))
+        norm_data['validfit_flag'] = np.zeros(len(self.results['RA']), dtype=int)  # 0: invalid, 1: valid
 
         for index, log in enumerate(self.results['IMFIT_logs_norm']):
-            row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
-            norm_data['Imfit_Flux'][index] = row['I']
-            norm_data['Imfit_Flux_err'][index] = row['Ierr']
-            norm_data['Peak_Intensity'][index] = row['Peak']
-            norm_data['Peak_Intensity_err'][index] = row['PeakErr']
-            norm_data['deconmajFWHM'][index] = row['DeconMaj']
-            norm_data['deconmajFWHM_err'][index] = row['DeconMajErr']
-            norm_data['deconminFWHM'][index] = row['DeconMin']
-            norm_data['deconminFWHM_err'][index] = row['DeconMinErr']
-            norm_data['deconPA'][index] = row['DeconPA']
-            norm_data['deconPA_err'][index] = row['DeconPAErr']
-            norm_data['imfit_ra'][index] = row['LongICRS']
-            norm_data['imfit_ra_err'][index] = row['LongICRSerr']
-            norm_data['imfit_dec'][index] = row['LatICRS']
-            norm_data['imfit_dec_err'][index] = row['LatICRSerr']
+            try:
+                row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+                norm_data['Imfit_Flux'][index] = row['I']
+                norm_data['Imfit_Flux_err'][index] = row['Ierr']
+                norm_data['Peak_Intensity'][index] = row['Peak']
+                norm_data['Peak_Intensity_err'][index] = row['PeakErr']
+                norm_data['deconmajFWHM'][index] = row['DeconMaj']
+                norm_data['deconmajFWHM_err'][index] = row['DeconMajErr']
+                norm_data['deconminFWHM'][index] = row['DeconMin']
+                norm_data['deconminFWHM_err'][index] = row['DeconMinErr']
+                norm_data['deconPA'][index] = row['DeconPA']
+                norm_data['deconPA_err'][index] = row['DeconPAErr']
+                norm_data['imfit_ra'][index] = row['LongICRS']
+                norm_data['imfit_ra_err'][index] = row['LongICRSerr']
+                norm_data['imfit_dec'][index] = row['LatICRS']
+                norm_data['imfit_dec_err'][index] = row['LatICRSerr']
+                norm_data['validfit_flag'][index] = 1  # 标记为有效拟合
+            except:
+                # 如果日志无效或格式不对，保持默认值（0或NaN）
+                continue
 
         df_normal = pd.DataFrame(norm_data)
         csv_path_norm = os.path.join(out_dir, f"{self.cluster_name}_results_normal.csv")
@@ -744,23 +757,29 @@ class BatchImfitter:
             rbm05_data['imfit_ra_err'] = np.zeros(len(self.results['RA']))
             rbm05_data['imfit_dec'] = np.zeros(len(self.results['RA']))  # 占位，后续填充
             rbm05_data['imfit_dec_err'] = np.zeros(len(self.results['RA']))
+            rbm05_data['validfit_flag'] = np.zeros(len(self.results['RA']), dtype=int)  # 0: invalid, 1: valid
 
             for index, log in enumerate(self.results['IMFIT_logs_rbm05']):
-                row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
-                rbm05_data['Imfit_Flux'][index] = row['I']
-                rbm05_data['Imfit_Flux_err'][index] = row['Ierr']
-                rbm05_data['Peak_Intensity'][index] = row['Peak']
-                rbm05_data['Peak_Intensity_err'][index] = row['PeakErr']
-                rbm05_data['deconmajFWHM'][index] = row['DeconMaj']
-                rbm05_data['deconmajFWHM_err'][index] = row['DeconMajErr']
-                rbm05_data['deconminFWHM'][index] = row['DeconMin']
-                rbm05_data['deconminFWHM_err'][index] = row['DeconMinErr']
-                rbm05_data['deconPA'][index] = row['DeconPA']
-                rbm05_data['deconPA_err'][index] = row['DeconPAErr']
-                rbm05_data['imfit_ra'][index] = row['LongICRS']
-                rbm05_data['imfit_ra_err'][index] = row['LongICRSerr']
-                rbm05_data['imfit_dec'][index] = row['LatICRS']
-                rbm05_data['imfit_dec_err'][index] = row['LatICRSerr']
+                try:
+                    row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+                    rbm05_data['Imfit_Flux'][index] = row['I']
+                    rbm05_data['Imfit_Flux_err'][index] = row['Ierr']
+                    rbm05_data['Peak_Intensity'][index] = row['Peak']
+                    rbm05_data['Peak_Intensity_err'][index] = row['PeakErr']
+                    rbm05_data['deconmajFWHM'][index] = row['DeconMaj']
+                    rbm05_data['deconmajFWHM_err'][index] = row['DeconMajErr']
+                    rbm05_data['deconminFWHM'][index] = row['DeconMin']
+                    rbm05_data['deconminFWHM_err'][index] = row['DeconMinErr']
+                    rbm05_data['deconPA'][index] = row['DeconPA']
+                    rbm05_data['deconPA_err'][index] = row['DeconPAErr']
+                    rbm05_data['imfit_ra'][index] = row['LongICRS']
+                    rbm05_data['imfit_ra_err'][index] = row['LongICRSerr']
+                    rbm05_data['imfit_dec'][index] = row['LatICRS']
+                    rbm05_data['imfit_dec_err'][index] = row['LatICRSerr']
+                    rbm05_data['validfit_flag'][index] = 1  # 标记为有效拟合
+                except:
+                    # 如果日志无效或格式不对，保持默认值（0或NaN）
+                    continue
             
             df_rbm05 = pd.DataFrame(rbm05_data)
                 

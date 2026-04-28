@@ -100,6 +100,7 @@ class Formation_Cluster:
     def __init__(self,url,distance=None):
         filename = Path(url).name
         self.filename = filename
+        self.url = url
         hdu = fits.open(url)
         self.hdu = hdu
         self.head = hdu[0].header
