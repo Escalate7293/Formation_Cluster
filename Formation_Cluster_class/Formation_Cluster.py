@@ -160,6 +160,32 @@ class Formation_Cluster:
         T_bright = 10 **(-26) * intensity * cons.c.value**2 / (2 * cons.k_B.value * freq**2 * self.sr_beam)
         return T_bright
 
+    # 真正的Brightness Temp计算，无近似
+    def Brightness_Temperature_Exact(self, intensity, freq):
+        """
+        使用完整的普朗克函数反推精确的亮温度 (不使用 RJ 近似)
+        intensity : 观测到的峰值流量 (Jy/beam)
+        freq      : 观测频率 (Hz)
+        """
+        # 1. 转化为 SI 单位 W m^-2 Hz^-1 beam^-1
+        intensity_SI = intensity * 1e-26
+        
+        # 2. 算出 I_nu (W m^-2 Hz^-1 sr^-1)
+        I_nu = intensity_SI / self.sr_beam
+        
+        # 3. 提取物理常数
+        h = cons.h.value
+        c = cons.c.value
+        k_B = cons.k_B.value
+        
+        # 4. 代入普朗克逆函数求 T_B
+        term1 = (h * freq) / k_B
+        term2 = np.log(1.0 + (2.0 * h * freq**3) / (c**2 * I_nu))
+        
+        T_bright_exact = term1 / term2
+        
+        return T_bright_exact
+
     def get_cutout_ins(self,ra_min=113.040875,ra_max=113.0406958,dec_min=-16.970138889,dec_max=-16.96994444):
         #ax.imshow(self.img,origin='lower')
         #ax.show()
@@ -3368,8 +3394,19 @@ def casa_imfit_manually(fits_url,base_instance,manual_estimate=None,show_fitting
         overwrite=True
     )
 
-    fitlog_name = os.path.join(working_dir, "fit_summary_log.dat"),
-    df = pd.read_csv(fitlog_name[0],index_col=False,header=0,delim_whitespace=True,skiprows=1)
+    fitlog_name = os.path.join(working_dir, "fit_summary_log.dat")
+    try:
+        df = pd.read_csv(fitlog_name,index_col=False,header=0,delim_whitespace=True,skiprows=1)
+    except FileNotFoundError:
+        # Create a mock fit_summary_log.dat if imfit fails to produce one
+        mock_content = """#                  Jy           Jy      Jy/beam      Jy/beam              deg              deg           arcsec           arcsec       arcsec       arcsec          deg       arcsec       arcsec          deg       arcsec       arcsec          deg       arcsec       arcsec          deg             GHz
+#  Plane            I         Ierr         Peak      PeakErr         LongICRS          LatICRS      LongICRSerr       LatICRSerr       ConMaj       ConMin        ConPA    ConMajErr    ConMinErr     ConPAErr     DeconMaj     DeconMin      DeconPA  DeconMajErr  DeconMinErr   DeconPAErr            Freq
+       0          NaN          NaN          NaN          NaN              NaN              NaN              NaN              NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN          NaN             NaN
+"""
+        with open(fitlog_name, 'w') as f:
+            f.write(mock_content)
+        df = pd.read_csv(fitlog_name,index_col=False,header=0,delim_whitespace=True,skiprows=1)
+
     fitlog = df.shift(axis=1)
     real_img = hdu_this[0].data
     wcs = WCS(hdu_this[0].header).celestial

@@ -183,7 +183,7 @@ def P_companion_given_detection(d, P_input, Sigma_local, tau=0.75):
     return numerator / denominator
 
 class HierarchyProbability:
-    def __init__(self, Z, fluxes, distance, CF_ori=0.2, Sigma=770, tau=0.5, CF_intep1d_instance=None):
+    def __init__(self, Z, fluxes, distance, CF_ori=0.2, Sigma=770, tau=0.5, CF_intep1d_instance=None, log_bins_mine=None, unfolder_A_matrix=None, P_bound_3D_array=None, density_3d_mine=None):
         self.Z = Z
         self.fluxes = fluxes
         self.n_stars = len(fluxes)
@@ -193,6 +193,10 @@ class HierarchyProbability:
         self.Sigma = Sigma
         self.tau = tau
         self.CF_intep1d_instance = CF_intep1d_instance
+        self.log_bins_mine = log_bins_mine
+        self.unfolder_A_matrix = unfolder_A_matrix
+        self.P_bound_3D_array = P_bound_3D_array
+        self.density_3d_mine = density_3d_mine
 
 
         # 存储每个节点的"最大亮度"，用于判定谁是主星
@@ -241,7 +245,7 @@ class HierarchyProbability:
             if P_cal_method == "Tobin":
                 p_link = P_companion_given_detection(d_pc,self.CF_ori,self.Sigma,tau=self.tau)
             elif P_cal_method == "Mine":
-                p_link = get_final_2d_bound_probability(s_proj=d_au, log_bins=log_bins_mine, unfolder_A_matrix=aaa.A, P_bound_3D_array=P_bound_3D_array, P_s_total=density_3d_mine)
+                p_link = get_final_2d_bound_probability(s_proj=d_au, log_bins=self.log_bins_mine, unfolder_A_matrix=self.unfolder_A_matrix, P_bound_3D_array=self.P_bound_3D_array, P_s_total=self.density_3d_mine)
         else:
             # print(d_pc)
             # 都提供CF插值实例了，就只用tobin method算概率了
@@ -525,11 +529,19 @@ class Cluster_Property:
         return MF, CF, MF_sigma_interval, CF_sigma_interval, multiple_systems   #, distance_au_array   现在距离统计不从这里出来
     
     def multiplicity_analyse_contamination_corrected(self,distance,thresh_multi_au=1000,CF_this_distance=None,global_Sigma=1000,tau=0.5,
-                                                     show=True,criterion='distance',method='centroid',P_cal_method="Tobin"):
+                                                     show=True,criterion='distance',method='centroid',P_cal_method="Tobin", **kwargs):
         """
         Performs multiplicity analysis using logarithmically-scaled flux weighting 
         for the centroid calculation in hierarchical clustering.
         """
+        # --- 0. 读入kwargs
+        # 获取 Mine 模式下需要的外部参数
+        log_bins_mine = kwargs.get('log_bins_mine')
+        unfolder_A_matrix = kwargs.get('unfolder_A_matrix')
+        P_bound_3D_array = kwargs.get('P_bound_3D_array')
+        density_3d_mine = kwargs.get('density_3d_mine')
+        get_final_2d_bound_probability = kwargs.get('get_final_2d_bound_probability_func')
+
         # --- 1. 准备坐标数据 ---
         # source points 的单位是度
         ra_modi_array = self.ra_array * np.cos(np.radians(self.dec_center))
@@ -599,7 +611,11 @@ class Cluster_Property:
                         self.distance, 
                         CF_ori=CF_this_distance, 
                         Sigma=global_Sigma, 
-                        tau=tau
+                        tau=tau,
+                        log_bins_mine=log_bins_mine,
+                        unfolder_A_matrix=unfolder_A_matrix,
+                        P_bound_3D_array=P_bound_3D_array,
+                        density_3d_mine=density_3d_mine
                     )
                     probs = calculator.run(P_cal_method=P_cal_method)
                     # print(probs)
@@ -643,7 +659,7 @@ class Cluster_Property:
                                 p_val = get_final_2d_bound_probability(
                                     s_proj=dist_au, 
                                     log_bins=log_bins_mine, 
-                                    unfolder_A_matrix=aaa.A, 
+                                    unfolder_A_matrix=unfolder_A_matrix, 
                                     P_bound_3D_array=P_bound_3D_array, 
                                     P_s_total=density_3d_mine
                                 )
@@ -658,69 +674,71 @@ class Cluster_Property:
                         # Tobin implies: if the link is low probability (<0.5), it is the cause.
                         # 如果 P < 0.5，说明这个连接贡献了主要的“概率损失” (1 - P > 0.5)
                         
-                        if min_p_link < 0.5:
-                            # === 决定拆分 (Split) ===
-                            # 在 split_node_idx 处切断，分成两个独立的系统
-                            
-                            # 从 Z 矩阵恢复该节点的左右子树
-                            # 注意：Z 矩阵第 i 行生成的簇索引是 n_current + i
-                            cluster_idx_in_tree = n_current + split_node_idx
-                            
-                            # 使用 to_tree 构建完整的树，然后找到对应节点的左右子节点
-                            # 这里稍微复杂一点，因为 to_tree 返回根节点。
-                            # 简单的办法：Z[i, 0] 和 Z[i, 1] 就是被合并的两个簇的索引
-                            
-                            idx_left_cluster = int(Z_sub[split_node_idx, 0])
-                            idx_right_cluster = int(Z_sub[split_node_idx, 1])
-                            
-                            # 辅助函数：获取簇索引包含的所有原始叶子索引
-                            def get_leaves_from_Z_idx(cluster_idx, n_leafs, Z_matrix):
-                                if cluster_idx < n_leafs:
-                                    return [cluster_idx]
-                                else:
-                                    row = cluster_idx - n_leafs
-                                    return get_leaves_from_Z_idx(int(Z_matrix[row, 0]), n_leafs, Z_matrix) + \
-                                           get_leaves_from_Z_idx(int(Z_matrix[row, 1]), n_leafs, Z_matrix)
+                        # 之前是判断是否小于0.5，现在改成最小的直接拆分
+                        # if min_p_link < 0.5:
 
-                            left_indices_local = get_leaves_from_Z_idx(idx_left_cluster, n_current, Z_sub)
-                            right_indices_local = get_leaves_from_Z_idx(idx_right_cluster, n_current, Z_sub)
-                            
-                            # 映射回 indices_subset 的全局索引
-                            left_indices_global = [indices_subset[x] for x in left_indices_local]
-                            right_indices_global = [indices_subset[x] for x in right_indices_local]
-                            
-                            # # 递归处理这两个新分出来的系统
-                            # # 精髓递归，如果真拆分，每一部分要么是[1] 要么是[n_effective]，然后list + list = [1, n_effective, ...], 真是太棒了
-                            # return resolve_system_structure(left_indices_global) + resolve_system_structure(right_indices_global)  
+                        # === 决定拆分 (Split) ===
+                        # 在 split_node_idx 处切断，分成两个独立的系统
+                        
+                        # 从 Z 矩阵恢复该节点的左右子树
+                        # 注意：Z 矩阵第 i 行生成的簇索引是 n_current + i
+                        cluster_idx_in_tree = n_current + split_node_idx
+                        
+                        # 使用 to_tree 构建完整的树，然后找到对应节点的左右子节点
+                        # 这里稍微复杂一点，因为 to_tree 返回根节点。
+                        # 简单的办法：Z[i, 0] 和 Z[i, 1] 就是被合并的两个簇的索引
+                        
+                        idx_left_cluster = int(Z_sub[split_node_idx, 0])
+                        idx_right_cluster = int(Z_sub[split_node_idx, 1])
+                        
+                        # 辅助函数：获取簇索引包含的所有原始叶子索引
+                        def get_leaves_from_Z_idx(cluster_idx, n_leafs, Z_matrix):
+                            if cluster_idx < n_leafs:
+                                return [cluster_idx]
+                            else:
+                                row = cluster_idx - n_leafs
+                                return get_leaves_from_Z_idx(int(Z_matrix[row, 0]), n_leafs, Z_matrix) + \
+                                        get_leaves_from_Z_idx(int(Z_matrix[row, 1]), n_leafs, Z_matrix)
 
-                            # ==========================================================
-                            # 🚨 终极 Bug 修复：找回因为切断内部树枝而变成“孤儿”的星星
-                            # ==========================================================
-                            # 将左右子树的成员集合起来
-                            involved_in_split = set(left_indices_global + right_indices_global)
+                        left_indices_local = get_leaves_from_Z_idx(idx_left_cluster, n_current, Z_sub)
+                        right_indices_local = get_leaves_from_Z_idx(idx_right_cluster, n_current, Z_sub)
+                        
+                        # 映射回 indices_subset 的全局索引
+                        left_indices_global = [indices_subset[x] for x in left_indices_local]
+                        right_indices_global = [indices_subset[x] for x in right_indices_local]
+                        
+                        # # 递归处理这两个新分出来的系统
+                        # # 精髓递归，如果真拆分，每一部分要么是[1] 要么是[n_effective]，然后list + list = [1, n_effective, ...], 真是太棒了
+                        # return resolve_system_structure(left_indices_global) + resolve_system_structure(right_indices_global)  
+
+                        # ==========================================================
+                        # 🚨 终极 Bug 修复：找回因为切断内部树枝而变成“孤儿”的星星
+                        # ==========================================================
+                        # 将左右子树的成员集合起来
+                        involved_in_split = set(left_indices_global + right_indices_global)
+                        
+                        # 找出当前组里，没在这个切断节点里的所有其它星 (比如星 C)
+                        everything_else_global =[x for x in indices_subset if x not in involved_in_split]
+                        
+                        # 1. 递归处理左子树
+                        ans = resolve_system_structure(left_indices_global)
+                        # 2. 递归处理右子树
+                        ans += resolve_system_structure(right_indices_global)
+                        
+                        # 3. 如果有孤儿星，把它们打包重新送进递归！
+                        # 它们会因为不受 A、B 错误质心的干扰，重新计算出正确的物理归宿
+                        if len(everything_else_global) > 0:
+                            ans += resolve_system_structure(everything_else_global)
                             
-                            # 找出当前组里，没在这个切断节点里的所有其它星 (比如星 C)
-                            everything_else_global =[x for x in indices_subset if x not in involved_in_split]
-                            
-                            # 1. 递归处理左子树
-                            ans = resolve_system_structure(left_indices_global)
-                            # 2. 递归处理右子树
-                            ans += resolve_system_structure(right_indices_global)
-                            
-                            # 3. 如果有孤儿星，把它们打包重新送进递归！
-                            # 它们会因为不受 A、B 错误质心的干扰，重新计算出正确的物理归宿
-                            if len(everything_else_global) > 0:
-                                ans += resolve_system_structure(everything_else_global)
-                                
-                            return ans
+                        return ans
 
 
-                        else:
-                            # === 不拆分 (Keep) ===
-                            # 虽然成员减少了 (n_effective < n_current)，但最弱的连接 P >= 0.5
-                            # 说明这是“累积概率损失” (Death by a thousand cuts)
-                            # 这种情况下，我们接受 n_effective 作为该系统的最终成员数
-                            return [n_effective]
+                        # else:
+                        #     # === 不拆分 (Keep) ===
+                        #     # 虽然成员减少了 (n_effective < n_current)，但最弱的连接 P >= 0.5
+                        #     # 说明这是“累积概率损失” (Death by a thousand cuts)
+                        #     # 这种情况下，我们接受 n_effective 作为该系统的最终成员数
+                        #     return [n_effective]
 
                 # 启动递归
                 final_systems_structure = resolve_system_structure(list(range(num_in_group)))
@@ -797,3 +815,934 @@ def cal_dust_gas_mass(total_flux_pbcor,total_flux_pbcor_err,instance,distance_pc
     M_dust_array = estimate_dust_mass_optically_thin(u_total_flux,distance_pc,freq=instance.Freq,kappa=kappa_band6,T=temperature_K)
     M_gas_array = M_dust_array * gas_to_dust_ratio
     return M_dust_array, M_gas_array
+
+
+
+# Cluste spatial distribution analysis
+from scipy.spatial.distance import pdist
+from matplotlib.collections import LineCollection
+from matplotlib.patches import Rectangle
+import astropy.units as u
+from matplotlib.ticker import MaxNLocator
+import networkx as nx
+from pathlib import Path
+from adjustText import adjust_text
+
+# ps distribution calculation based on Cartwright & Whitworth (2004) Section 3.2 & 3.3
+def calculate_ps_distribution(ra_array, dec_array, distance_pc, ra_center=None, dec_center=None, R_cluster=None,
+                               i_max=20, visualize=True, cname="Cluster"):
+    """
+    计算星团的 p(s) 分布和归一化关联长度 s_bar。
+    基于 Cartwright & Whitworth (2004) Section 3.2 & 3.3。
+
+    参数:
+    ra_array, dec_array: 源的坐标数组 (度)
+    distance_pc: 星团距离 (pc)，用于物理尺度转换
+    i_max: bin 的数量 (用户自定义，默认 20)
+    visualize: 是否画图
+
+    返回:
+    dict: 包含计算结果的字典
+        - 's_bar': 归一化关联长度
+        - 's_values': bin 的中心值 (x轴)
+        - 'p_s': 概率密度值 (y轴)
+        - 'R_cluster': 星团半径 (AU)
+    """
+    
+    num_stars = len(ra_array)
+    if num_stars < 2:
+        print("源数量不足，无法计算 p(s)。")
+        return None
+
+    # --- 1. 坐标转换 (Deg -> AU) 并中心化 ---
+    # 使用平均位置作为几何中心
+    if ra_center is None and dec_center is None:
+        ra_mean = np.mean(ra_array)
+        dec_mean = np.mean(dec_array)
+        ra_center = ra_mean
+        dec_center = dec_mean
+    
+    # 简单的平面对射投影 (Flat approximation)
+    cos_dec = np.cos(np.radians(dec_center))
+    scale_factor = 3600 * distance_pc # 1度 = 3600角秒 * 距离 = AU
+    
+    x_au = (ra_array - ra_center) * cos_dec * scale_factor
+    y_au = (dec_array - dec_center) * scale_factor
+    
+    # 组合成 (N, 2) 数组
+    coords = np.column_stack([x_au, y_au])
+
+    # --- 2. 计算 R_cluster (星团半径) ---
+    # 定义：从平均位置(0,0)到最远恒星的距离
+    dist_from_center = np.linalg.norm(coords, axis=1)
+    if R_cluster is None:
+        R_cluster = np.max(dist_from_center)
+        # print(f"Calculated R_cluster: {R_cluster:.2f} AU")
+
+    # --- 3. 计算所有成对距离 (Separations) ---
+    # pdist 返回 N*(N-1)/2 个距离
+    separations_au = pdist(coords)
+    
+    # --- 4. 计算 s_bar (归一化关联长度) ---
+    # s_bar = mean(separations) / R_cluster
+    mean_separation = np.mean(separations_au)
+    s_bar = mean_separation / R_cluster
+
+    # --- 5. 计算 p(s) 分布 ---
+    # 论文中 p(s) 的自变量 s 是归一化后的距离，即 s = separation / R_cluster
+    # s 的范围通常在 0 到 2 之间
+    s_normalized = separations_au / R_cluster
+    
+    # 定义 bins
+    # 范围 0 到 2，共 i_max 个 bin
+
+    relative_Rmax = 2 * np.max(dist_from_center) / R_cluster
+    bins_edge = np.linspace(0, relative_Rmax, i_max + 1)
+    delta_s = bins_edge[1] - bins_edge[0] # bin width
+    
+    # 计算直方图 (Counts)
+    counts, _ = np.histogram(s_normalized, bins=bins_edge)
+    
+    # 转换为概率密度 p(s)
+    # 论文公式 (3): p(s_i) = 2 * N_i / (N_total * (N_total - 1) * delta_s)
+    # 其中 N_total * (N_total - 1) / 2 正好是总的成对数量 (len(s_normalized))
+    # 所以公式等价于: p(s_i) = (N_i / 总对数) / delta_s
+    # 这就是标准的概率密度归一化
+    
+    total_pairs = len(s_normalized)
+    p_s = counts / (total_pairs * delta_s)
+    
+    # 计算 bin 的中心点 (用于画图 x 轴)
+    s_values = (bins_edge[:-1] + bins_edge[1:]) / 2
+
+    # --- 6. 可视化 ---
+    if visualize:
+        fig,ax = plt.subplots(figsize=(8,6))        
+        # # 绘制 p(s) 数据点/柱状图
+        # ax.bar(s_values, p_s, width=delta_s, align='center', 
+        #         color='skyblue', edgecolor='black', alpha=0.7, label='Cluster Data')
+        
+        # 绘制平滑曲线 (可选)
+        ax.plot(s_values, p_s, 'k-o', markersize=10, linewidth=1,markerfacecolor='red',label=f'{cname} Data')
+        
+        # # 绘制参考线 p(s) = 2s (针对 s < 1 的均匀圆盘近似)
+        # # 这有助于判断是否存在子结构 (s_bar < 0.8) 或中心聚集 (s_bar > 0.8)
+        # s_ref = np.linspace(0, 1, 100)
+        # ax.plot(s_ref, 2 * s_ref, 'r--', label=r'Uniform Disk ($p(s)=2s$)')
+        
+        # 标注 s_bar
+        ax.axvline(s_bar, color='green', linestyle='-.', linewidth=2, label=r'$\bar{s}$ (Mean)')
+        
+        ax.set_xlabel(r'Normalized Separation $s$')
+        ax.set_ylabel(r'$p(s)$')
+        # ax.settitle(f'Separation Distribution p(s)\n$\overline{{s}} = {s_bar:.2f}$, $i_{{max}} = {i_max}$')
+        ax.set_xlim(0, 2)
+        ax.legend()
+        # ax.grid(True, linestyle=':', alpha=0.6)
+        ax.minorticks_on()
+        ax.tick_params(which='major', length=8, width=1, direction='in',top=True,right=True)
+        ax.tick_params(which='minor', length=4, width=1, direction='in',top=True,right=True)
+        plt.show()
+    else:
+        fig = None
+
+    return {
+        's_bar': s_bar,
+        's_values': s_values,
+        'p_s': p_s,
+        'R_cluster_au': R_cluster,
+        'fig': fig
+    }
+
+# all source MST
+def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=1000, cluster_name="Cluster", visualize=True, manual_center=None):
+    """
+    基于 AU 物理单位生成 MST 并进行可视化。
+    坐标原点 (0,0) 为图像中心。
+    
+    参数:
+    ra_array, dec_array: 绝对坐标数组 (度)
+    instance: 包含 head 信息的对象 (需有 CRVAL1, CRVAL2)
+    distance_pc: 源的距离 (pc)
+    visualize: 是否绘图
+    """
+    
+    # --- 1. 坐标转换 (Deg -> AU) ---
+    if manual_center is not None:
+        ra_center, dec_center = manual_center
+    elif instance is not None:
+        ra_center = instance.head['CRVAL1']
+        dec_center = instance.head['CRVAL2']
+    else:
+        ra_center = np.mean(ra_array)
+        dec_center = np.mean(dec_array)
+    cos_dec = np.cos(np.radians(dec_center))
+
+    # 1. 计算角度 Offset (单位：度)
+    # ra_offset 包含 cos(delta) 修正
+    d_ra_deg = (ra_array - ra_center) * cos_dec
+    d_dec_deg = dec_array - dec_center
+    
+    # 2. 转换为 AU
+    # 1 deg = 3600 arcsec, 1 arcsec * dist(pc) = 1 AU
+    # 公式: theta(deg) * 3600 * d(pc) = L(AU)
+    scale_factor = 3600 * distance_pc
+    
+    x_au = d_ra_deg * scale_factor
+    y_au = d_dec_deg * scale_factor
+    
+    num_points = len(ra_array)
+    # 合并坐标 (N, 2)
+    points_au = np.vstack([x_au, y_au]).T
+
+    # --- 2. 构建完全图 ---
+    G = nx.Graph()
+    for i in range(num_points):
+        G.add_node(i, pos=points_au[i])
+
+    # 预计算所有边的权重 (欧氏距离, AU)
+    edges_to_add = []
+    for i in range(num_points):
+        for j in range(i + 1, num_points):
+            dist_au = np.linalg.norm(points_au[i] - points_au[j])
+            edges_to_add.append((i, j, dist_au))
+            
+    G.add_weighted_edges_from(edges_to_add)
+
+    # --- 3. 计算 MST ---
+    print("正在计算 MST (Prim算法)...")
+    MST = nx.minimum_spanning_tree(G, algorithm='prim', weight='weight')
+    print(f"MST 计算完成: {MST.number_of_edges()} 条边。")
+
+    # --- 4. 演讲级可视化 (AU 模式) ---
+    if visualize:
+        plt.style.use('default') 
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=150) # 正方形画布
+        
+        # A. 提取 MST 边
+        lines = []
+        for u, v in MST.edges():
+            pos_u = G.nodes[u]['pos'] # [x_au, y_au]
+            pos_v = G.nodes[v]['pos']
+            lines.append([pos_u, pos_v])
+            
+        # B. 绘制边
+        lc = LineCollection(lines, colors='#B0B0B0', linewidths=1.2, alpha=0.8, zorder=1)
+        ax.add_collection(lc)
+        
+        # C. 绘制节点
+        ax.scatter(x_au, y_au, 
+                   s=80, c='#007799', edgecolors='white', linewidth=1.2, 
+                   alpha=1.0, zorder=2, label='Sources'
+                   )
+        
+        # D. 坐标轴设置
+        # ax.set_xlabel(r'$\Delta$ RA $\cos(\delta)$ (AU)', fontsize=12, fontfamily='serif')
+        # ax.set_ylabel(r'$\Delta$ Dec (AU)', fontsize=12, fontfamily='serif')
+        ax.set_xlabel('R.A. Offset (au)', fontsize=12, fontfamily='serif')
+        ax.set_ylabel('Dec. Offset (au)', fontsize=12, fontfamily='serif')
+        
+        # 1. RA 翻转 (东左西右)
+        ax.invert_xaxis()
+        
+        # 2. 强制正方形视场，并将 (0,0) 置于中心
+        # 找出绝对值最大的坐标，并加一点余量 (10%)
+        max_limit = np.max(np.abs(points_au)) * 1.1
+        
+        # 设置两轴范围一致，确保是正方形且中心为0
+        ax.set_xlim(max_limit, -max_limit) # 注意 x 是反转的: 正 -> 负
+        ax.set_ylim(-max_limit, max_limit)
+        
+        # 3. 强制 Aspect Ratio 为 1
+        ax.set_aspect('equal')
+        
+        # E. 添加中心十字丝 (参考线)
+        ax.axhline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
+        ax.axvline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
+
+        # F. 比例尺 (Scale Bar)
+        # 自动找一个漂亮的整数值 (比如 1000, 2000, 5000)
+        span_au = 2 * max_limit
+        scale_len_au = 10 ** np.floor(np.log10(span_au * 0.2))
+        # 简单的取整优化逻辑
+        if scale_len_au * 5 < span_au * 0.3: scale_len_au *= 5
+        elif scale_len_au * 2 < span_au * 0.3: scale_len_au *= 2
+        
+        scale_txt = f"{int(scale_len_au)} au"
+        
+        # 放置在左下角 (基于当前的 max_limit)
+        # 左边界是 max_limit (因为翻转了), 下边界是 -max_limit
+        x_start = max_limit - (max_limit * 2) * 0.08 # 向内缩 8%
+        y_start = -max_limit + (max_limit * 2) * 0.08
+        
+        ax.plot([x_start, x_start - scale_len_au], [y_start, y_start], 
+                color='black', linewidth=2, zorder=10)
+        ax.text(x_start - scale_len_au/2, y_start + max_limit * 0.03, 
+                scale_txt, ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+        # G. 标题与刻度
+        title_str = f'MST Structure of {cluster_name}\nDistance = {distance_pc} pc'
+        ax.set_title(title_str, fontsize=14, fontweight='bold', pad=15, fontfamily='serif')
+        
+        # ax.tick_params(direction='in', length=6, width=1, labelsize=10, top=True, right=True)
+        ax.minorticks_on()
+        ax.tick_params(labelsize=10, which='major',length=6, width=1, top=True, bottom=True, left=True, right=True,direction='in') 
+        ax.tick_params(which='minor', length=3, width=1, top=True, bottom=True, left=True, right=True,direction='in') 
+
+        plt.tight_layout()
+        plt.show()
+    else:
+        fig = None
+
+    return MST,fig
+
+# calculate m_bar based on Cartwright & Whitworth (2004) Section 3.2 & 3.3
+def calculate_m_bar_strict(mst_graph, ra_array, dec_array, distance_pc,
+                           ra_center=None,dec_center=None,R_cluster=None):
+    """
+    严格基于 Cartwright & Whitworth (2004) 定义计算归一化平均边长 m_bar。
+    
+    定义引用: 
+    "the mean length of the branches of the tree, divided by 
+    (N_total * A)^0.5 / (N_total - 1)"
+
+    参数:
+    mst_graph: networkx.Graph 对象 (边的权重属性名为 'weight'，单位需为 AU)
+    ra_array, dec_array: 源的坐标数组 (度)
+    distance_pc: 星团距离 (pc)
+
+    返回:
+    m_bar: 归一化平均边长
+    debug_info: 包含中间变量的字典
+    """
+    
+    # 1. 获取源数量 N_total
+    N_total = mst_graph.number_of_nodes()
+    if N_total < 2:
+        print("源数量不足，无法计算 m_bar")
+        return None, {}
+
+    # 2. 计算 MST 总边长 (Sum of edge lengths)
+    total_edge_length = mst_graph.size(weight='weight')
+    
+    # 3. 计算这一项: "mean length of the branches of the tree"
+    # MST 的边数固定为 N_total - 1
+    mean_edge_length = total_edge_length / (N_total - 1)
+    
+    # 4. 计算星团面积 A
+    # 坐标转换 (Deg -> AU)，以平均位置为中心
+    if ra_center is None and dec_center is None:
+        ra_mean = np.mean(ra_array)
+        dec_mean = np.mean(dec_array)
+        ra_center = ra_mean
+        dec_center = dec_mean
+    
+    cos_dec = np.cos(np.radians(dec_center))
+    scale_factor = 3600 * distance_pc # 1度 -> AU
+    
+    x_au = (ra_array - ra_center) * cos_dec * scale_factor
+    y_au = (dec_array - dec_center) * scale_factor
+    
+    # R_cluster: 从几何中心到最远源的距离
+    if R_cluster is None:
+        dist_from_center = np.sqrt(x_au**2 + y_au**2)
+        R_cluster = np.max(dist_from_center)
+    
+    # Area: 论文定义的投影面积 A = pi * R^2
+    Area = np.pi * R_cluster**2
+    
+    # 5. 计算分母: (N_total * A)^0.5 / (N_total - 1)
+    numerator_of_factor = np.sqrt(N_total * Area)
+    denominator_of_factor = N_total - 1
+    
+    normalization_factor = numerator_of_factor / denominator_of_factor
+    
+    # 6. 计算最终的 m_bar
+    if normalization_factor == 0:
+        m_bar = 0
+    else:
+        m_bar = mean_edge_length / normalization_factor
+
+    # 打包中间结果以便检查
+    debug_info = {
+        'N_total': N_total,
+        'Sum_Edge_Length': total_edge_length,
+        'Mean_Edge_Length': mean_edge_length, # 分子
+        'Area_AU2': Area,
+        'Normalization_Factor': normalization_factor, # 分母
+        'R_cluster_AU': R_cluster
+    }
+
+    return m_bar, debug_info
+
+
+
+
+# chance alignment probability calculation
+def calculate_tobin_distances_plot_corrected(points, brightness, Z, hp_instance, cut_threshold=10000, plot_pairs=False):
+    """
+    根据 Tobin 2022 附录 A.2 逻辑，计算距离分布及其对应的真实存在概率。
+    
+    参数:
+    - points: (n, 2) 坐标数组 (单位: AU)
+    - brightness: (n,) 亮度数组
+    - Z: linkage 矩阵 (method='centroid' 或 'average')
+    - hp_instance: 已经调用过 run() 且收敛的 HierarchyProbability 实例
+    - cut_threshold: 距离截断阈值 (默认 10000 AU)
+    - plot_pairs: 是否绘图
+    
+    返回:
+    - logged_distances: 合并分离度数组 (Z[:, 2])
+    - logged_probs: 对应的合并概率
+    - logged_pairs: 用于绘图的最亮星连接对
+    """
+    n_stars = len(points)
+    
+    # 从 hp_instance 获取我们需要的概率和节点亮度信息
+    final_probs = hp_instance.final_probs
+    node_max_flux = hp_instance.node_max_flux
+    
+    logged_distances =[]
+    logged_probs = []
+    logged_pairs =[]
+    
+    valid_nodes = set(range(n_stars))
+    
+    # 用于绘图：记录每个节点（无论是叶子还是簇）内最亮星的原始索引
+    brightest_in_cluster = {i: i for i in range(n_stars)}
+
+    # 辅助函数：递归获取某个节点下的所有原始单星 (Leaves) 索引
+    def get_leaves(node_id):
+        if node_id < n_stars:
+            return [node_id]
+        else:
+            row = node_id - n_stars
+            return get_leaves(int(Z[row, 0])) + get_leaves(int(Z[row, 1]))
+
+    # --- 遍历合并树 ---
+    for i, row in enumerate(Z):
+        dist = row[2]
+        new_cluster_idx = n_stars + i
+        left_idx = int(row[0])
+        right_idx = int(row[1])
+        
+        # 如果任一子节点在此前被跳过，则当前节点也跳过
+        if left_idx not in valid_nodes or right_idx not in valid_nodes:
+            continue
+            
+        # 截断大于阈值的无物理意义的合并
+        if dist > cut_threshold:
+            continue
+            
+        valid_nodes.add(new_cluster_idx)
+        
+        # 1. 根据节点最大亮度，判断谁是主星分支，谁是伴星分支
+        if node_max_flux[left_idx] >= node_max_flux[right_idx]:
+            companion_idx = right_idx
+        else:
+            companion_idx = left_idx
+            
+        # 2. 计算这个距离对应的概率：伴星分支中所有单星的最小 final_prob
+        companion_leaves = get_leaves(companion_idx)
+        sep_prob = np.min(final_probs[companion_leaves])
+        
+        # 记录 Tobin 逻辑的距离和概率
+        logged_distances.append(dist)
+        logged_probs.append(sep_prob)
+
+        # --- 以下为绘图准备逻辑 ---
+        b1 = brightest_in_cluster[left_idx]
+        b2 = brightest_in_cluster[right_idx]
+        logged_pairs.append((b1, b2))
+
+        # 更新新簇的最亮星信息
+        if brightness[b1] >= brightness[b2]:
+            brightest_in_cluster[new_cluster_idx] = b1
+        else:
+            brightest_in_cluster[new_cluster_idx] = b2
+
+    logged_distances = np.array(logged_distances)
+    logged_probs = np.array(logged_probs)
+
+    # --- 绘图部分 ---
+    if plot_pairs and len(logged_pairs) > 0:
+        plt.figure(figsize=(8, 8))
+        ax = plt.gca()
+        
+        # 绘制星星 (大小随亮度变化)
+        sizes = brightness / np.max(brightness) * 100 + 20
+        ax.scatter(points[:, 0], points[:, 1], s=sizes, c='none', edgecolors='k', zorder=3, label='Stars')
+        
+        # 绘制统计连线，用颜色的深浅或线条粗细表示概率大小
+        for idx, (id_start, id_end) in enumerate(logged_pairs):
+            p1 = points[id_start]
+            p2 = points[id_end]
+            prob = logged_probs[idx]
+            
+            # 概率越高，线越实；概率越低，线越虚/透明
+            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color='blue', alpha=prob*0.8 + 0.2, linewidth=1.5 * prob + 0.5)
+            
+            # 可选：在连线中点标出概率
+            mid_x, mid_y = (p1[0] + p2[0])/2, (p1[1] + p2[1])/2
+            ax.text(mid_x, mid_y, f"p={prob:.2f}", color='red', fontsize=8)
+            
+        title_str = f"Tobin (2022) Probabilistic Mergers\nTotal Valid Pairs: {len(logged_pairs)}"
+        ax.set_title(title_str)
+        ax.set_xlabel("X (AU)")
+        ax.set_ylabel("Y (AU)")
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        plt.show()
+
+    return logged_distances, logged_probs, logged_pairs
+def calculate_tobin_distances_plot_corrected_noprob(points, brightness, Z, cut_threshold=10000, plot_pairs=False):
+    """
+    根据 Tobin 2022 附录 A.2 逻辑，计算距离分布，不带概率。
+    
+    参数:
+    - points: (n, 2) 坐标数组 (单位: AU)
+    - brightness: (n,) 亮度数组
+    - Z: linkage 矩阵 (method='centroid' 或 'average')
+    - cut_threshold: 距离截断阈值 (默认 10000 AU)
+    - plot_pairs: 是否绘图
+    
+    返回:
+    - logged_distances: 合并分离度数组 (Z[:, 2])
+    - logged_pairs: 用于绘图的最亮星连接对
+    """
+    n_stars = len(points)
+    
+    logged_distances =[]
+    logged_pairs =[]
+    
+    valid_nodes = set(range(n_stars))
+    
+    # 用于绘图：记录每个节点（无论是叶子还是簇）内最亮星的原始索引
+    brightest_in_cluster = {i: i for i in range(n_stars)}
+
+    # --- 遍历合并树 ---
+    for i, row in enumerate(Z):
+        dist = row[2]
+        new_cluster_idx = n_stars + i
+        left_idx = int(row[0])
+        right_idx = int(row[1])
+        
+        # 如果任一子节点在此前被跳过，则当前节点也跳过
+        if left_idx not in valid_nodes or right_idx not in valid_nodes:
+            continue
+        
+        # 截断大于阈值的无物理意义的合并
+        if dist > cut_threshold:
+            continue
+            
+        valid_nodes.add(new_cluster_idx)
+        
+        # 记录 Tobin 逻辑的距离
+        logged_distances.append(dist)
+
+        # --- 以下为绘图准备逻辑 ---
+        b1 = brightest_in_cluster[left_idx]
+        b2 = brightest_in_cluster[right_idx]
+        logged_pairs.append((b1, b2))
+
+        # 更新新簇的最亮星信息
+        if brightness[b1] >= brightness[b2]:
+            brightest_in_cluster[new_cluster_idx] = b1
+        else:
+            brightest_in_cluster[new_cluster_idx] = b2
+
+    logged_distances = np.array(logged_distances)
+
+    # --- 绘图部分 ---
+    if plot_pairs and len(logged_pairs) > 0:
+        plt.figure(figsize=(8, 8))
+        ax = plt.gca()
+        
+        # 绘制星星 (大小随亮度变化)
+        sizes = brightness / np.max(brightness) * 100 + 20
+        ax.scatter(points[:, 0], points[:, 1], s=sizes, c='none', edgecolors='k', zorder=3, label='Stars')
+        
+        # 绘制统计连线
+        for idx, (id_start, id_end) in enumerate(logged_pairs):
+            p1 = points[id_start]
+            p2 = points[id_end]
+            
+            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color='blue', alpha=0.5, linewidth=1)
+            
+        title_str = f"Tobin (2022) Distances\nTotal Valid Pairs: {len(logged_pairs)}"
+        ax.set_title(title_str)
+        ax.set_xlabel("X (AU)")
+        ax.set_ylabel("Y (AU)")
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        plt.show()
+
+    return logged_distances, logged_pairs
+
+
+class ProjectionBayesianUnfolder_v1:
+    def __init__(self, s_array_intial, bins=np.logspace(1.5, 4.5, 25), show_initial=True):
+        self.s_array = s_array_intial
+        self.s_array_intial = s_array_intial
+        self.bins = bins
+        P_s = np.histogram(s_array_intial, bins=bins)[0]    
+        P_s = P_s / np.sum(P_s) # 归一化
+        self.P_s = P_s
+        self.P_s_initial = P_s
+        self.s_centers = (bins[:-1] + bins[1:]) / 2
+        if show_initial:
+            plt.figure()
+            plt.plot(self.s_centers, self.P_s, 'ko-', label='Initial P(s)')
+            plt.xscale('log')
+            plt.xlabel('s (au)')
+            plt.ylabel('P(s)')
+            plt.title('Initial Guess for True 3D Separation Distribution')
+            plt.legend()
+            plt.show()
+    
+    def P_s_proj_given_s(self, s_proj, s_true):
+        if s_proj >= s_true:
+            return 0
+        else:
+            return s_proj / (s_true * np.sqrt(s_true**2 - s_proj**2)) 
+            # return 1 - np.sqrt(1 - (s_proj / s_true)**2) # 这个是累积概率，前一个是概率密度函数
+    
+    def BFactor(self, s_proj):
+        # 计算贝叶斯更新的分母：∫ P(s) P(s_proj | s) ds
+        integrand = np.array([self.P_s_proj_given_s(s_proj, s) * self.P_s[i] for i, s in enumerate(self.s_centers)])
+        return np.trapz(integrand, self.s_centers)
+
+    def P_s_given_s_proj(self, s_proj, s_true):
+        # 计算后验分布：P(s | s_proj) ∝ P(s_proj | s) P(s)
+        interp1d_func = interp1d(self.s_centers, self.P_s, kind='cubic', fill_value="extrapolate")
+        P_s_interp = interp1d_func(s_true)
+        numerator = self.P_s_proj_given_s(s_proj, s_true) * P_s_interp
+        denominator = self.BFactor(s_proj)
+        return numerator / denominator if denominator > 0 else 0
+
+    def P_lessthan_st_given_s_proj(self, s_proj, s_t):
+        # 计算 P(s < s_t | s_proj) = ∫_0^{s_t} P(s | s_proj) ds
+        s_grid = np.logspace(np.log10(s_proj), np.log10(s_t), 1000)
+        integrand = np.array([self.P_s_given_s_proj(s_proj, s) for s in s_grid])
+        return np.trapz(integrand, s_grid)
+
+    def P_lessthan_st_given_s_proj_elegant(self, s_proj, s_t):
+        """
+        使用三角换元消除奇点的完美积分法
+        """
+        if s_proj >= s_t:
+            return 0.0
+            
+        # 构造一个连续的先验概率分布函数
+        # 注意：fill_value=0 表示如果 s 超出我们统计的网格，概率为 0
+        P_s_interp = interp1d(self.s_centers, self.P_s, kind='linear', bounds_error=False, fill_value=0.0)
+        
+        # 积分上限角
+        theta_max = np.arccos(s_proj / s_t)
+        
+        # 构建角度网格 (避免用梯形法，直接在无奇点的角度空间均匀撒点)
+        theta_grid_num = np.linspace(0, theta_max, 500)
+        theta_grid_den = np.linspace(0, np.pi/2 - 1e-5, 1000) # 接近 90 度时 s趋向无穷大
+        
+        # 把角度转回 s，查询先验概率
+        s_grid_num = s_proj / np.cos(theta_grid_num)
+        s_grid_den = s_proj / np.cos(theta_grid_den)
+        
+        # 在角度空间下，积分就是单纯的 P(s) 对 theta 积分！
+        integrand_num = P_s_interp(s_grid_num)
+        integrand_den = P_s_interp(s_grid_den)
+        
+        numerator = np.trapz(integrand_num, theta_grid_num)
+        denominator = np.trapz(integrand_den, theta_grid_den)
+        
+        if denominator <= 0:
+            return 0.0
+            
+        return min(numerator / denominator, 1.0) # 永远在 0~1 之间且严格单调
+
+class ProjectionBayesianUnfolder_v2:
+    def __init__(self, s_array_initial, bins=np.logspace(1.5, 4.5, 20), show_initial=True):
+        """
+        bins: 建议上限设置到星团的物理直径（比如 100,000 au = 0.5 pc），这样才能容纳所有的远端背景污染。
+        """
+        self.s_array_initial = s_array_initial
+        self.bins = bins
+        self.n_bins = len(bins) - 1
+        
+        # 计算 bin 的对数中点作为代表真实 3D 距离的 s_centers
+        self.s_centers = np.sqrt(bins[:-1] * bins[1:])
+        
+        # 计算观测到的投影距离 2D 分布 O(R)
+        counts, _ = np.histogram(s_array_initial, bins=bins)
+        self.O_prob = counts / np.sum(counts) # 归一化的观测概率
+        
+        # 初始猜测：假设 3D 真实分布 P(s) 等于观测分布 O(R)
+        self.P_s = np.copy(self.O_prob)
+        
+        # 核心突破：直接构建无奇点的精确解析转移矩阵 A[i, j]
+        self.A = self._build_exact_analytical_matrix()
+        
+        if show_initial:
+            plt.figure(figsize=(8, 5))
+            plt.step(self.s_centers, self.O_prob, where='mid', label='Observed 2D $P(s_{proj})$', color='orange')
+            plt.xscale('log')
+            plt.xlabel('Separation (au)')
+            plt.ylabel('Probability')
+            plt.title('Initial State')
+            plt.legend()
+            plt.show()
+
+    def _build_exact_analytical_matrix(self):
+        """
+        神仙代换：直接利用精确的解析 CDF，彻底消灭积分奇点！
+        计算 A[i, j] = P(投影距离落在 bin i | 真实 3D 距离在 bin j 的中心)
+        """
+        A = np.zeros((self.n_bins, self.n_bins))
+        
+        # 解析累积分布函数：P(s_proj < R | s_true) = 1 - sqrt(1 - (R/s_true)^2)  (当 R <= s_true 时)
+        def exact_cdf(R, s_true):
+            if R >= s_true:
+                return 1.0
+            return 1.0 - np.sqrt(1.0 - (R / s_true)**2)
+
+        for j, s_true in enumerate(self.s_centers):
+            for i in range(self.n_bins):
+                R_lower = self.bins[i]
+                R_upper = self.bins[i+1]
+                
+                # 落在 bin i 内的概率 = CDF(R_upper) - CDF(R_lower)
+                # 没有任何梯形积分，没有任何奇点，绝对精确！
+                prob_in_bin = exact_cdf(R_upper, s_true) - exact_cdf(R_lower, s_true)
+                A[i, j] = prob_in_bin
+                
+        return A
+
+    def run_EM_iteration(self, max_iter=1000, tol=1e-5, show_result=True):
+        """
+        执行 EM 期望最大化迭代 (数学上等价于 Richardson-Lucy Deconvolution)
+        让星团自己告诉你它的真实 3D 距离分布！
+        """
+        print("Starting EM Iteration for 3D Deprojection...")
+        P_s = np.copy(self.O_prob)
+        
+        for i in range(max_iter):
+            # 1. 给定当前的 3D 分布猜测，预测我们理应看到的 2D 投影分布
+            O_pred = self.A @ P_s
+            
+            # 防止除以 0
+            O_pred[O_pred == 0] = 1e-12 
+            
+            # 2. 计算观测值与预测值的比例反馈
+            ratio = self.O_prob / O_pred
+            
+            # 3. 贝叶斯更新：将反馈通过转置矩阵传导回 3D 空间
+            # 这行代码等价于你公式里那个复杂的贝叶斯分母展开和积分求和！
+            P_s_new = P_s * (self.A.T @ ratio)
+            
+            # 确保严格归一化
+            P_s_new /= np.sum(P_s_new)
+            
+            # 检查收敛条件
+            diff = np.max(np.abs(P_s_new - P_s))
+            P_s = P_s_new
+            if diff < tol:
+                print(f"Converged perfectly at iteration {i}!")
+                break
+                
+        self.P_s = P_s # 保存收敛后的全局真实 3D 分布
+        
+        if show_result:
+            plt.figure(figsize=(8, 5))
+            plt.step(self.s_centers, self.O_prob, where='mid', label='Observed 2D (Apparent)', color='orange', alpha=0.6)
+            plt.step(self.s_centers, self.P_s, where='mid', label='Inferred 3D (True)', color='blue', linewidth=2)
+            plt.xscale('log')
+            plt.xlabel('Separation (au)')
+            plt.ylabel('Probability Density')
+            plt.title('EM Iteration Result: 2D Projected vs 3D True')
+            plt.legend()
+            plt.show()
+            
+        return self.P_s
+
+    def P_bound_given_sproj(self, s_proj, s_t):
+        """
+        终极判定函数：当我们观测到一个 s_proj，它真实 3D 距离 < s_t 的概率是多少？
+        这个函数将用于你的 linkage 树剪枝！
+        """
+        # 找到 s_proj 落在哪一个 bin 里
+        i = np.digitize(s_proj, self.bins) - 1
+        if i < 0 or i >= self.n_bins:
+            return 0.0 # 超出统计范围，视为不绑定
+            
+        # 根据贝叶斯定理，提取这个 s_proj 对应的整个真实 3D 距离的后验概率分布
+        # P(s_j | s_proj_i) ∝ P(s_proj_i | s_j) * P(s_j)
+        posterior_3d = self.A[i, :] * self.P_s
+        sum_post = np.sum(posterior_3d)
+        
+        if sum_post <= 0:
+            return 0.0
+            
+        posterior_3d /= sum_post # 归一化
+        
+        # 寻找 s_t 对应的边界
+        # 把所有中心点 < s_t 的 bin 的概率加起来，就是它受到引力束缚的终极概率！
+        bound_mask = self.s_centers < s_t
+        P_bound = np.sum(posterior_3d[bound_mask])
+        
+        return P_bound
+    
+    def plot_3D_log10_distribution(self):
+        """
+        绘制 EM 算法算出的真实 3D 距离的 log10 直方图。
+        这是超越 Tobin 的结果 (Tobin 只有 2D)。
+        """
+        # 将 bins 转换为对数空间
+        log_bins = np.log10(self.bins)
+        log_centers = (log_bins[:-1] + log_bins[1:]) / 2
+        bin_widths = np.diff(log_bins)
+        
+        plt.figure(figsize=(8, 6))
+        
+        # 绘制直方图条形
+        plt.bar(log_centers, self.P_s, width=bin_widths, 
+                color='skyblue', edgecolor='black', alpha=0.8, align='center', label='Inferred 3D $P(s)$')
+        
+        # 可选：把观测的 2D 分布也画上去对比
+        plt.step(log_bins, np.append(self.O_prob, self.O_prob[-1]), 
+                 where='post', color='red', linestyle='--', linewidth=2, label='Observed 2D $O(R)$')
+        
+        plt.xlabel(r'$\log_{10}(\mathrm{True\ 3D\ Separation / au})$', fontsize=14)
+        plt.ylabel('Probability Fraction', fontsize=14)
+        plt.title('Reconstructed 3D Separation Distribution (Log10 Space)', fontsize=16)
+        plt.legend(fontsize=12)
+        plt.grid(True, axis='y', linestyle='--', alpha=0.5)
+        plt.show()
+
+        return log_centers, self.P_s, bin_widths
+
+    def get_3D_log10_density(self):
+        """
+        将 EM 算法内部的 Fraction 转换为严格的对数空间概率密度 (PDF)。
+        满足积分守恒：sum(density * d_log_s) = 1.0
+        """
+        log_bins = np.log10(self.bins)
+        bin_widths = np.diff(log_bins) # 每个 bin 的对数宽度
+        
+        # 核心转换：Density = Fraction / Bin_Width
+        density_3d = self.P_s / bin_widths
+        density_2d_obs = self.O_prob / bin_widths
+        
+        return log_bins, density_3d, density_2d_obs
+
+    def plot_3D_log10_density(self):
+        """
+        绘制严格的 Density 直方图，完美对标理论 PDF
+        """
+        log_bins, density_3d, density_2d_obs = self.get_3D_log10_density()
+        log_centers = (log_bins[:-1] + log_bins[1:]) / 2
+        bin_widths = np.diff(log_bins)
+        
+        plt.figure(figsize=(8, 6))
+        
+        # 绘制反演后的 3D 真实 Density
+        plt.bar(log_centers, density_3d, width=bin_widths, 
+                color='skyblue', edgecolor='black', alpha=0.8, align='center', 
+                label=r'3D PDF $\frac{dP}{d\log_{10}s}$ after iterations')
+        
+        # 绘制观测到的 2D 投影 Density 作为对比
+        plt.step(log_bins, np.append(density_2d_obs, density_2d_obs[-1]), 
+                 where='post', color='red', linestyle='--', linewidth=2, 
+                 label=r'Observed 2D PDF')
+        
+        plt.xlabel(r'$\log_{10}(\mathrm{Separation / au})$', fontsize=14)
+        plt.ylabel('Probability Density', fontsize=14) # 这里是严格的 Density
+        # plt.title('Strict Probability Density Function (Log10 Space)', fontsize=16)
+        plt.legend(fontsize=12)
+        plt.grid(True, axis='y', linestyle='--', alpha=0.5)
+        plt.show()
+
+
+
+def generate_mock_cluster_3d(N, sigma_median_pc2):
+    """
+    根据中位数表面密度，生成一个内部完全随机、无物理双星的 3D 均匀球体星团。
+    """
+    # 1. 计算等效物理半径 (单位: pc)
+    R_pc = np.sqrt(N / (np.pi * sigma_median_pc2))
+    
+    # 2. 在 3D 球体内均匀随机撒点
+    # 半径采样 (r^3 是均匀分布的，这样体积密度才均匀)
+    r_pc = R_pc * np.cbrt(np.random.rand(N))
+    
+    # 角度采样
+    theta = np.random.uniform(0, 2 * np.pi, N)
+    cos_phi = np.random.uniform(-1, 1, N)
+    sin_phi = np.sqrt(1 - cos_phi**2)
+    
+    # 转换为笛卡尔坐标 (单位: pc)
+    x_pc = r_pc * sin_phi * np.cos(theta)
+    y_pc = r_pc * sin_phi * np.sin(theta)
+    z_pc = r_pc * cos_phi
+    
+    # 将单位转换为 AU (因为你的 linkage 习惯用 AU 计算)
+    pc2au = u.pc.to(u.au)
+    points_3d_au = np.vstack([x_pc, y_pc, z_pc]).T * pc2au
+    
+    return points_3d_au
+
+def extract_chance_3d_separations(N_stars, sigma_median_pc2, real_fluxes, N_iterations=100,cut_threshold=np.inf):
+    """
+    进行大迭代：多次生成 Mock 星团，跑 3D linkage，收集所有的偶然合并距离。
+    """
+    all_mock_distances =[]
+    
+    print(f"Running {N_iterations} Mock Iterations to estimate P_chance(s_3D)...")
+    for i in range(N_iterations):
+        # 1. 生成无物理双星的 3D 坐标
+        mock_points_3d = generate_mock_cluster_3d(N_stars, sigma_median_pc2)
+        
+        # 2. 随机打乱真实的 flux 赋予这些假星 (保留光度函数特征，消除空间相关性)
+        mock_fluxes = np.random.permutation(real_fluxes)
+        
+        # 3. 在三维空间直接跑 linkage
+        # 注意：这里算的是 3D 物理距离的聚类！
+        Z_3d = linkage(mock_points_3d, method='centroid')
+        
+        # 4. 使用你之前写的提取函数 (需确保它能直接接收 3D points)
+        # 假设你使用的是那个基于 Z 和 brightest 提取的函数 (这里仅演示调用逻辑)
+        # mock_distances = calculate_tobin_distances_3D_compatible(
+        #     mock_points_3d, mock_fluxes, Z_3d, cut_threshold=np.inf
+        # )
+        # mock_distances = calculate_tobin_distances_plot(mock_points_3d, mock_fluxes, Z_3d, cut_threshold=cut_threshold)[0]
+        mock_distances = calculate_tobin_distances_plot_corrected_noprob(mock_points_3d, mock_fluxes, Z_3d, cut_threshold=cut_threshold)[0]
+        
+        all_mock_distances.extend(mock_distances)
+        
+    return np.array(all_mock_distances)
+
+def get_final_2d_bound_probability(s_proj, log_bins, unfolder_A_matrix, P_bound_3D_array, P_s_total):
+    """
+    s_proj: 你 2D linkage 里的距离
+    log_bins: 你的网格边界
+    unfolder_A_matrix: 你之前运行 EM 算法的转移矩阵 (unfolder.A)
+    P_bound_3D_array: 刚算出来的 3D 绑定概率
+    P_s_total: 你的 density_3d_mine
+    """
+    i = np.digitize(s_proj, 10**log_bins) - 1
+    if i < 0 or i >= len(log_bins)-1:
+        return 0.0
+        
+    # 提取在已知 s_proj 的情况下，3D 真实距离 s 的后验分布
+    # (这正是 EM 算法最伟大之处，它告诉你 2D 投影对应的 3D 来源分布)
+    posterior_3d = unfolder_A_matrix[i, :] * P_s_total
+    
+    if np.sum(posterior_3d) == 0:
+        return 0.0
+        
+    posterior_3d /= np.sum(posterior_3d) # 归一化
+    
+    # 终极全概率积分：把“3D后验”与“3D绑定概率”乘起来求和！
+    P_final_bound = np.sum(posterior_3d * P_bound_3D_array)
+    
+    return P_final_bound
+

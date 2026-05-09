@@ -1,0 +1,13 @@
+# FITS
+*.fits
+*.fits.gz
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Output folders
+examples/test_output_G034/
+
+# macOS
+.DS_Store
