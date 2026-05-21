@@ -827,10 +827,11 @@ from matplotlib.ticker import MaxNLocator
 import networkx as nx
 from pathlib import Path
 from adjustText import adjust_text
+from tqdm import tqdm
 
 # ps distribution calculation based on Cartwright & Whitworth (2004) Section 3.2 & 3.3
 def calculate_ps_distribution(ra_array, dec_array, distance_pc, ra_center=None, dec_center=None, R_cluster=None,
-                               i_max=20, visualize=True, cname="Cluster"):
+                               i_max=20, visualize=True, cname="Cluster", ax=None):
     """
     计算星团的 p(s) 分布和归一化关联长度 s_bar。
     基于 Cartwright & Whitworth (2004) Section 3.2 & 3.3。
@@ -917,32 +918,41 @@ def calculate_ps_distribution(ra_array, dec_array, distance_pc, ra_center=None, 
 
     # --- 6. 可视化 ---
     if visualize:
-        fig,ax = plt.subplots(figsize=(8,6))        
+        if ax is None:
+            fig, ax_plot = plt.subplots(figsize=(8,6))
+        else:
+            fig = ax.figure
+            ax_plot = ax
         # # 绘制 p(s) 数据点/柱状图
-        # ax.bar(s_values, p_s, width=delta_s, align='center', 
+        # ax_plot.bar(s_values, p_s, width=delta_s, align='center', 
         #         color='skyblue', edgecolor='black', alpha=0.7, label='Cluster Data')
         
         # 绘制平滑曲线 (可选)
-        ax.plot(s_values, p_s, 'k-o', markersize=10, linewidth=1,markerfacecolor='red',label=f'{cname} Data')
+        ax_plot.plot(s_values, p_s, 'k-o', markersize=7, linewidth=1,markerfacecolor='red',markeredgecolor='red',label=f'{cname} Data')
         
         # # 绘制参考线 p(s) = 2s (针对 s < 1 的均匀圆盘近似)
         # # 这有助于判断是否存在子结构 (s_bar < 0.8) 或中心聚集 (s_bar > 0.8)
         # s_ref = np.linspace(0, 1, 100)
-        # ax.plot(s_ref, 2 * s_ref, 'r--', label=r'Uniform Disk ($p(s)=2s$)')
+        # ax_plot.plot(s_ref, 2 * s_ref, 'r--', label=r'Uniform Disk ($p(s)=2s$)')
         
         # 标注 s_bar
-        ax.axvline(s_bar, color='green', linestyle='-.', linewidth=2, label=r'$\bar{s}$ (Mean)')
-        
-        ax.set_xlabel(r'Normalized Separation $s$')
-        ax.set_ylabel(r'$p(s)$')
-        # ax.settitle(f'Separation Distribution p(s)\n$\overline{{s}} = {s_bar:.2f}$, $i_{{max}} = {i_max}$')
-        ax.set_xlim(0, 2)
-        ax.legend()
-        # ax.grid(True, linestyle=':', alpha=0.6)
-        ax.minorticks_on()
-        ax.tick_params(which='major', length=8, width=1, direction='in',top=True,right=True)
-        ax.tick_params(which='minor', length=4, width=1, direction='in',top=True,right=True)
-        plt.show()
+        ax_plot.axvline(s_bar, color='k', linestyle='--', linewidth=2, label=r'$\bar{s}$ (Mean)')
+        ax_plot.text(0.95,0.95,cname, transform=ax_plot.transAxes, fontsize=15, ha='right', va='top')
+
+
+        ax_plot.set_xlabel(r'Normalized Separation $s$')
+        ax_plot.set_ylabel(r'$p(s)$')
+        # ax_plot.settitle(f'Separation Distribution p(s)\n$\overline{{s}} = {s_bar:.2f}$, $i_{{max}} = {i_max}$')
+        # ax_plot.set_xlim(0.05, 1.95)
+        ax_plot.set_xlim(0.0, 2.0)
+        ax_plot.set_ylim(0.0, 1.89)
+        # ax_plot.legend()
+        # ax_plot.grid(True, linestyle=':', alpha=0.6)
+        ax_plot.minorticks_on()
+        ax_plot.tick_params(which='major', direction='in',top=True,right=True)
+        ax_plot.tick_params(which='minor', direction='in',top=True,right=True)
+        if ax is None:
+            plt.show()
     else:
         fig = None
 
@@ -955,7 +965,7 @@ def calculate_ps_distribution(ra_array, dec_array, distance_pc, ra_center=None, 
     }
 
 # all source MST
-def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=1000, cluster_name="Cluster", visualize=True, manual_center=None):
+def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=1000, cluster_name="Cluster", visualize=True, manual_center=None, ax=None):
     """
     基于 AU 物理单位生成 MST 并进行可视化。
     坐标原点 (0,0) 为图像中心。
@@ -986,8 +996,15 @@ def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=10
     # 2. 转换为 AU
     # 1 deg = 3600 arcsec, 1 arcsec * dist(pc) = 1 AU
     # 公式: theta(deg) * 3600 * d(pc) = L(AU)
-    scale_factor = 3600 * distance_pc
-    
+    if isinstance(distance_pc, (int, float)):
+        scale_factor = 3600 * distance_pc
+        xlabel = 'R.A. Offset (au)'
+        ylabel = 'Dec. Offset (au)'
+    else:
+        scale_factor = 3600 #* float(distance_pc)
+        xlabel = 'R.A. Offset (arcsec)'
+        ylabel = 'Dec. Offset (arcsec)'
+
     x_au = d_ra_deg * scale_factor
     y_au = d_dec_deg * scale_factor
     
@@ -1010,14 +1027,18 @@ def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=10
     G.add_weighted_edges_from(edges_to_add)
 
     # --- 3. 计算 MST ---
-    print("正在计算 MST (Prim算法)...")
+    # print("正在计算 MST (Prim算法)...")
     MST = nx.minimum_spanning_tree(G, algorithm='prim', weight='weight')
-    print(f"MST 计算完成: {MST.number_of_edges()} 条边。")
+    # print(f"MST 计算完成: {MST.number_of_edges()} 条边。")
 
     # --- 4. 演讲级可视化 (AU 模式) ---
     if visualize:
-        plt.style.use('default') 
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=150) # 正方形画布
+        # plt.style.use('default') 
+        if ax is None:
+            fig, ax_plot = plt.subplots(figsize=(10, 10)) # 正方形画布
+        else:
+            fig = ax.figure
+            ax_plot = ax
         
         # A. 提取 MST 边
         lines = []
@@ -1027,74 +1048,190 @@ def create_and_visualize_mst2(ra_array, dec_array, instance=None, distance_pc=10
             lines.append([pos_u, pos_v])
             
         # B. 绘制边
-        lc = LineCollection(lines, colors='#B0B0B0', linewidths=1.2, alpha=0.8, zorder=1)
-        ax.add_collection(lc)
+        lc = LineCollection(lines, colors='k', linewidths=1.5, alpha=1.0, zorder=1) #'#B0B0B0'
+        ax_plot.add_collection(lc)
         
         # C. 绘制节点
-        ax.scatter(x_au, y_au, 
-                   s=80, c='#007799', edgecolors='white', linewidth=1.2, 
-                   alpha=1.0, zorder=2, label='Sources'
-                   )
+        ax_plot.plot(x_au, y_au, 
+                   'o', markersize=5, markerfacecolor='red', markeredgecolor='red', linestyle='None', 
+                    zorder=2, label='Sources'
+                   ) #'#007799'
         
         # D. 坐标轴设置
-        # ax.set_xlabel(r'$\Delta$ RA $\cos(\delta)$ (AU)', fontsize=12, fontfamily='serif')
-        # ax.set_ylabel(r'$\Delta$ Dec (AU)', fontsize=12, fontfamily='serif')
-        ax.set_xlabel('R.A. Offset (au)', fontsize=12, fontfamily='serif')
-        ax.set_ylabel('Dec. Offset (au)', fontsize=12, fontfamily='serif')
+        # ax_plot.set_xlabel(r'$\Delta$ RA $\cos(\delta)$ (AU)', fontsize=12, fontfamily='serif')
+        # ax_plot.set_ylabel(r'$\Delta$ Dec (AU)', fontsize=12, fontfamily='serif')
+        # ax_plot.set_xlabel('R.A. Offset (au)', fontsize=12, fontfamily='serif')
+        # ax_plot.set_ylabel('Dec. Offset (au)', fontsize=12, fontfamily='serif')
+        ax_plot.set_xlabel(xlabel)
+        ax_plot.set_ylabel(ylabel)
         
         # 1. RA 翻转 (东左西右)
-        ax.invert_xaxis()
+        ax_plot.invert_xaxis()
         
         # 2. 强制正方形视场，并将 (0,0) 置于中心
         # 找出绝对值最大的坐标，并加一点余量 (10%)
         max_limit = np.max(np.abs(points_au)) * 1.1
         
         # 设置两轴范围一致，确保是正方形且中心为0
-        ax.set_xlim(max_limit, -max_limit) # 注意 x 是反转的: 正 -> 负
-        ax.set_ylim(-max_limit, max_limit)
+        ax_plot.set_xlim(max_limit, -max_limit) # 注意 x 是反转的: 正 -> 负
+        ax_plot.set_ylim(-max_limit, max_limit)
         
         # 3. 强制 Aspect Ratio 为 1
-        ax.set_aspect('equal')
+        points_au = np.vstack([x_au, y_au]).T
+        ax_plot.set_aspect('equal')
         
         # E. 添加中心十字丝 (参考线)
-        ax.axhline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
-        ax.axvline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
+        ax_plot.axhline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
+        ax_plot.axvline(0, color='gray', linestyle=':', linewidth=0.8, alpha=0.5, zorder=0)
 
         # F. 比例尺 (Scale Bar)
         # 自动找一个漂亮的整数值 (比如 1000, 2000, 5000)
-        span_au = 2 * max_limit
-        scale_len_au = 10 ** np.floor(np.log10(span_au * 0.2))
-        # 简单的取整优化逻辑
-        if scale_len_au * 5 < span_au * 0.3: scale_len_au *= 5
-        elif scale_len_au * 2 < span_au * 0.3: scale_len_au *= 2
-        
-        scale_txt = f"{int(scale_len_au)} au"
-        
-        # 放置在左下角 (基于当前的 max_limit)
-        # 左边界是 max_limit (因为翻转了), 下边界是 -max_limit
-        x_start = max_limit - (max_limit * 2) * 0.08 # 向内缩 8%
-        y_start = -max_limit + (max_limit * 2) * 0.08
-        
-        ax.plot([x_start, x_start - scale_len_au], [y_start, y_start], 
-                color='black', linewidth=2, zorder=10)
-        ax.text(x_start - scale_len_au/2, y_start + max_limit * 0.03, 
-                scale_txt, ha='center', va='bottom', fontsize=10, fontweight='bold')
+        if isinstance(distance_pc, (int, float)):
+            span_au = 2 * max_limit
+            scale_len_au = 10 ** np.floor(np.log10(span_au * 0.2))
+            # 简单的取整优化逻辑
+            if scale_len_au * 5 < span_au * 0.3: scale_len_au *= 5
+            elif scale_len_au * 2 < span_au * 0.3: scale_len_au *= 2
+            
+            scale_txt = f"{int(scale_len_au)} au"
+            
+            # 放置在左下角 (基于当前的 max_limit)
+            # 左边界是 max_limit (因为翻转了), 下边界是 -max_limit
+            x_start = max_limit - (max_limit * 2) * 0.08 # 向内缩 8%
+            y_start = -max_limit + (max_limit * 2) * 0.08
+            
+            ax_plot.plot([x_start, x_start - scale_len_au], [y_start, y_start], 
+                    color='black', linewidth=2, zorder=10)
+            ax_plot.text(x_start - scale_len_au/2, y_start + max_limit * 0.03, 
+                    scale_txt, ha='center', va='bottom', fontsize=10, fontweight='bold')
+        else:
+            # 设置真实距离的比例尺，从fc读入距离
+            span_au = 10000# * instance.distance
+            span_arcsec = span_au / instance.distance # 实际绘制单位是arcsec
+
+            scale_txt = f"{int(span_au)} au"
+            
+            # 使用transAxes坐标系，在0.95, 0.05处放置
+            ax_plot.text(0.95, 0.05, scale_txt, transform=ax_plot.transAxes, 
+                         ha='right', va='bottom', fontsize=15)#, fontweight='bold')
+            
+            # 配合下面的 ax_plot.set_xlim(-20, 20) (视野宽 40 arcsec)，计算比例尺相对长度
+            span_axes = span_arcsec / 40.0
+            ax_plot.plot([0.95, 0.95 - span_axes], [0.03, 0.03], 
+                         color='black', linewidth=2, zorder=10, transform=ax_plot.transAxes)
+
 
         # G. 标题与刻度
         title_str = f'MST Structure of {cluster_name}\nDistance = {distance_pc} pc'
-        ax.set_title(title_str, fontsize=14, fontweight='bold', pad=15, fontfamily='serif')
+        ax_plot.text(0.95, 0.95, cluster_name, transform=ax_plot.transAxes, fontsize=15, ha='right', va='top')
+        # ax_plot.set_title(title_str, fontsize=14, fontweight='bold', pad=15)#, fontfamily='serif')
         
-        # ax.tick_params(direction='in', length=6, width=1, labelsize=10, top=True, right=True)
-        ax.minorticks_on()
-        ax.tick_params(labelsize=10, which='major',length=6, width=1, top=True, bottom=True, left=True, right=True,direction='in') 
-        ax.tick_params(which='minor', length=3, width=1, top=True, bottom=True, left=True, right=True,direction='in') 
+        # ax_plot.tick_params(direction='in', length=6, width=1, labelsize=10, top=True, right=True)
+        if isinstance(distance_pc, (int, float)):
+            pass
+        else:
+            ax_plot.set_xlim(-20, 20)
+            ax_plot.set_ylim(-20, 20)
+            ax_plot.invert_xaxis()
+        
+        ax_plot.minorticks_on()
+        ax_plot.tick_params(which='major', top=True, bottom=True, left=True, right=True,direction='in') 
+        ax_plot.tick_params(which='minor', top=True, bottom=True, left=True, right=True,direction='in') 
 
-        plt.tight_layout()
-        plt.show()
+        if ax is None:
+            plt.tight_layout()
+            plt.show()
     else:
         fig = None
 
     return MST,fig
+
+def analyze_mass_segregation(ra_array, dec_array, mass_array
+                             , instance=None, distance_pc=1000
+                             , visualize=True, cluster_name="Cluster"
+                             , num_min=3
+                             , manual_center=None):
+    """
+    计算并可视化质量隔离度 (Mass Segregation Ratio, MSR) 随 N_MST 变化的图表。
+    使用 Allison et al. 2009 的方法:
+    提取前 N 个最重目标的 MST 长度 (l_massive)，以及重复抽取 N 个随机目标的平均 MST 长度 (l_random)。
+    MSR = <l_random> / l_massive。
+    """
+    
+    # 提取质量 nominal 值并降序排序
+    if hasattr(mass_array[0], 'nominal_value'):
+        mass_array_val = unumpy.nominal_values(mass_array)
+    else:
+        mass_array_val = np.array(mass_array)
+        
+    sort_idx = np.argsort(-mass_array_val)
+    ra_array_sorted = ra_array[sort_idx]
+    dec_array_sorted = dec_array[sort_idx]
+    
+    msr_list = []
+    msr_err_list = []
+    
+    # num_min = 2
+    N_list = np.arange(num_min, len(ra_array), 1)
+    
+    def random_MST_length_statistic(N_MST, N_random):
+        l_norm_list = np.zeros(N_random)
+        for i in range(N_random):
+            idx = np.random.choice(len(ra_array), size=N_MST, replace=False)
+            sampled_ra = ra_array[idx]
+            sampled_dec = dec_array[idx]
+            mst_this, _ = create_and_visualize_mst2(
+                sampled_ra, sampled_dec, 
+                instance=instance, distance_pc=distance_pc, 
+                visualize=False, manual_center=manual_center
+            )
+            distance_this = sum(d['weight'] for u, v, d in mst_this.edges(data=True))
+            l_norm_list[i] = distance_this
+        return np.mean(l_norm_list), np.std(l_norm_list)
+
+    for N_MST in tqdm(N_list, desc="Calculating MSR"):
+        mst_massive, _ = create_and_visualize_mst2(
+            ra_array_sorted[:N_MST], dec_array_sorted[:N_MST], 
+            instance=instance, distance_pc=distance_pc, 
+            visualize=False, manual_center=manual_center
+        )
+        l_massive = sum(d['weight'] for u, v, d in mst_massive.edges(data=True))
+        
+        N_random = 100 if N_MST >= len(ra_array) / 2 else 1000
+        mean_l_norm, std_l_norm = random_MST_length_statistic(N_MST, N_random)
+        
+        msr = mean_l_norm / l_massive
+        msr_err = std_l_norm / l_massive
+        msr_list.append(msr)
+        msr_err_list.append(msr_err)
+        
+    msr_list = np.array(msr_list)
+    msr_err_list = np.array(msr_err_list)
+    
+    if visualize:
+        fontsize = 20
+        fig, ax = plt.subplots(figsize=(9, 7), facecolor='white')
+        
+        ax.errorbar(N_list, msr_list, yerr=msr_err_list,
+                    marker='o', markersize=9, linestyle='None',
+                    markerfacecolor='None', color='black', capsize=5, 
+                    zorder=3, elinewidth=1, label=f'{cluster_name}')
+        ax.hlines(1.0, 0, len(ra_array), linestyles='--', linewidth=2.5, color='red', zorder=2)
+        
+        ax.tick_params(labelsize=fontsize, which='major', top=True, bottom=True, left=True, right=True, direction='in')
+        ax.tick_params(which='minor', top=True, bottom=True, left=True, right=True, direction='in')
+        
+        ax.set_xlabel(r'$N_\mathrm{MST}$', fontsize=fontsize)
+        ax.set_ylabel(r'Mass Segregation Ratio $\Lambda_\mathrm{MSR}$', fontsize=fontsize)
+        ax.minorticks_on()
+        ax.set_xlim(0, len(ra_array))
+        ax.legend(prop={'size': 20}, loc='upper right')
+        
+        plt.show()
+    else:
+        fig = None
+        
+    return N_list, msr_list, msr_err_list, fig
 
 # calculate m_bar based on Cartwright & Whitworth (2004) Section 3.2 & 3.3
 def calculate_m_bar_strict(mst_graph, ra_array, dec_array, distance_pc,
