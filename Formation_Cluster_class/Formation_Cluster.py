@@ -96,6 +96,33 @@ hue_sat_value2_cmap = LinearSegmentedColormap.from_list("HueSatValue2", list(zip
 # plt.show()
 
 
+def _scientific_plot_rc(labelsize=12, axes_labelsize=None):
+    if axes_labelsize is None:
+        axes_labelsize = labelsize
+    return {
+        'font.family': 'DejaVu Sans',
+        'font.sans-serif': ['DejaVu Sans', 'Arial', 'Helvetica', 'Liberation Sans'],
+        'mathtext.fontset': 'dejavusans',
+        'axes.linewidth': 1.5,
+        'axes.labelsize': axes_labelsize,
+        'xtick.major.width': 1.5,
+        'ytick.major.width': 1.5,
+        'xtick.minor.width': 1.5,
+        'ytick.minor.width': 1.5,
+        'xtick.major.size': 7,
+        'ytick.major.size': 7,
+        'xtick.minor.size': 3.5,
+        'ytick.minor.size': 3.5,
+        'xtick.direction': 'in',
+        'ytick.direction': 'in',
+        'xtick.top': True,
+        'ytick.right': True,
+        'xtick.labelsize': labelsize,
+        'ytick.labelsize': labelsize,
+        'axes.unicode_minus': False,
+    }
+
+
 class Formation_Cluster:
     def __init__(self,url,distance=None):
         filename = Path(url).name
@@ -2827,235 +2854,218 @@ import casatasks.imfit as imfit
 import casatasks.exportfits as exportfits
 
 def plot_residual_new(real_img,model_img,fitlog,header,wcs,pix2arcsec,RMS,cmap=hue_sat_value2_cmap,fontsize = 25,box_region=None,id_slice=None):
-    font = {'color'  : 'black','weight' : 'normal','size'   : fontsize}#'family' : 'serif',
-    fig = plt.figure(figsize=(40,12))
-    plt.rcParams['xtick.labelsize'] = fontsize
-    plt.rcParams['ytick.labelsize'] = fontsize
-    # X、Y轴刻度标签字体大小
-    plt.rcParams['axes.labelsize'] = fontsize
-    # gs = gridspec.GridSpec(4,1) # 创立2 * 6 网格
-    # gs.update(wspace=-0.334,hspace=0)
-    # 对第一行进行绘制
-    # gs_set_array = np.array([gs[0,0:1],gs[0,1:2],gs[0,2:3]])
+    ny, nx = real_img.shape
+    x_center = (nx - 1) / 2.0
+    y_center = (ny - 1) / 2.0
 
-    # 计算指数范围
-    vmin = RMS * 3
-    vmax = np.nanmax(real_img) #real_img.max()
-    min_exp = int(np.floor(np.log10(vmin)))
-    max_exp = int(np.ceil(np.log10(vmax)))
+    try:
+        x_scale = float(header.get('CDELT1', np.nan)) * 3600.0
+    except Exception:
+        x_scale = np.nan
+    try:
+        y_scale = float(header.get('CDELT2', np.nan)) * 3600.0
+    except Exception:
+        y_scale = np.nan
+    if not np.isfinite(x_scale) or x_scale == 0:
+        x_scale = -abs(pix2arcsec)
+    if not np.isfinite(y_scale) or y_scale == 0:
+        y_scale = abs(pix2arcsec)
 
-    tickvals = []
-    for exp in range(min_exp, max_exp + 1):
-        for coef in [1, 4]:
-            val = coef * 10**exp
-            if vmin <= val <= vmax:
-                tickvals.append(val)
+    x_offsets = (np.arange(nx) - x_center) * x_scale
+    y_offsets = (np.arange(ny) - y_center) * y_scale
+    extent = [x_offsets[0], x_offsets[-1], y_offsets[0], y_offsets[-1]]
 
-    ax0 = fig.add_subplot(131,projection=wcs)
-    ax1 = fig.add_subplot(132,projection=wcs)
-    ax2 = fig.add_subplot(133,projection=wcs)
-    ax = np.array([ax0,ax1,ax2])
-    # norm1 = LogNorm(vmin=vmin,vmax=real_img.max())
-    norm1 = PowerNorm(gamma=0.5,vmin=0,vmax=vmax)
-    # print(real_img.max())
-    imshow1 = ax[0].imshow(real_img,norm=norm1,origin='lower',cmap=hue_sat_value2_cmap#'viridis'
-                            ,alpha=1,interpolation='bicubic')
-    effect = withStroke(linewidth=2, foreground='red')
-    wcsaxes.add_beam(ax=ax[0],header=header,pad=2,path_effects=[effect])
-    ax[0].text(0.02, 0.9,'Data', transform=ax[0].transAxes, 
-    verticalalignment='top', horizontalalignment='left', fontsize=30,color='black')
+    def pixel_to_offset(xpix, ypix):
+        return (xpix - x_center) * x_scale, (ypix - y_center) * y_scale
 
-    w2h = ax[0].get_window_extent().width / ax[0].get_window_extent().height
-    # ax1_divider = make_axes_locatable(ax[0])
-    # # Add an Axes above the main Axes.
-    # cax1 = ax1_divider.append_axes("top", size="{}%".format(1/(20 * w2h)*100), pad=0)
-    cb1 = plt.colorbar(imshow1,ax=ax[0], aspect=20,fraction=0.1,orientation='horizontal')
-    cb1.set_ticks(LogLocator(base=10.0))  # 使 colorbar 刻度以 log 方式显示
-    cb1.ax.xaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=[0.2,0.3,0.4, 0.5,0.6, 0.7,0.8,0.9], numticks=10))
-    cb1.ax.tick_params(labelsize=fontsize, length=8, width=2)  #设置色标刻度字体大小。
-    cb1.ax.tick_params(direction='in')
-    cb1.ax.xaxis.set_ticks_position('bottom')  # 让刻度移动到下方
-    cb1.ax.tick_params(axis="both", which="major", width=2, length=8, direction='in')
-    cb1.ax.tick_params(axis="both", which="minor", width=1.5, length=4, direction='in')
-    font = {'family' : 'serif','color'  : 'darkred','weight' : 'normal','size'   : fontsize}
-    cb1.set_label('Intensity (Jy/beam)',fontdict=font) #设置colorbar的标签字体及其大小
-        
-    ax[0].set_ylabel('Dec. Offset')
-    ax[0].set_xlabel('R.A. Offset')
-    ax[0].coords[0].display_minor_ticks(True)
-    ax[0].coords[1].display_minor_ticks(True)
-    ax[0].coords[0].display_minor_ticks(True)
-    ax[0].coords[1].set_ticks_position('lr')
-    ax[0].coords[0].set_ticks_position('b')
-    # ax[0].coords[0].coord_wrap = 180 * u.degree
-    # ax[0].coords[0].set_major_formatter('s.ss')
-    # ax[0].coords[1].set_major_formatter('s.ss')
-    ax[0].tick_params(axis='both', length=8, width=2, direction='in')
+    def imfit_pa_to_offset_angle(pa_deg):
+        # CASA/imfit PA is measured from +Dec. toward +R.A.; Matplotlib
+        # Ellipse angles are measured from the plotted x axis. Since the
+        # residual plot now uses signed R.A./Dec. offsets instead of pixel x/y,
+        # the old pixel-space conversion (90 + PA) must be mirrored.
+        return 90.0 - float(pa_deg)
 
-    # print(model_img)
-    imshow2 = ax[1].imshow(model_img,norm=norm1,origin='lower',cmap=hue_sat_value2_cmap
-                            ,alpha=1,interpolation='bicubic') #gaussian_array_B+gaussian_array
-    wcsaxes.add_beam(ax=ax[1],header=header,pad=2,path_effects=[effect])
-    ax[1].text(0.02, 0.9,'Model', transform=ax[1].transAxes, 
-    verticalalignment='top', horizontalalignment='left', fontsize=30,color='black')
-
-    w2h = ax[1].get_window_extent().width / ax[1].get_window_extent().height
-    cb2 = plt.colorbar(imshow1,ax=ax[1], aspect=20,fraction=0.1,orientation='horizontal')
-    cb2.set_ticks(LogLocator(base=10.0))  # 使 colorbar 刻度以 log 方式显示
-    cb2.ax.xaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=[0.2,0.3,0.4, 0.5,0.6, 0.7,0.8,0.9], numticks=10))
-    cb2.ax.tick_params(labelsize=fontsize, length=8, width=2)  #设置色标刻度字体大小。
-    cb2.ax.tick_params(direction='in')
-    cb2.ax.xaxis.set_ticks_position('bottom')  # 让刻度移动到下方
-    cb2.ax.tick_params(axis="both", which="major", width=2, length=8, direction='in')
-    cb2.ax.tick_params(axis="both", which="minor", width=1.5, length=4, direction='in')
-    font = {'family' : 'serif','color'  : 'darkred','weight' : 'normal','size'   : fontsize}
-    cb2.set_label('Intensity (Jy/beam)',fontdict=font) #设置colorbar的标签字体及其大小    
-
-    ax[1].coords[0].set_ticks_position('b')
-    ax[1].coords[0].default_label = ''
-    ax[1].set_xlabel('R.A. Offset')
-    ax[1].coords[0].display_minor_ticks(True)
-    ax[1].coords[1].default_label = ''
-    #ax[1].set_ylabel('Dec. Offset')
-    ax[1].coords[1].set_ticks_visible(True)
-    ax[1].coords[1].set_ticklabel_visible(False)
-    ax[1].coords[1].display_minor_ticks(True)
-    ax[1].coords[0].display_minor_ticks(True)
-    #ax[1].coords[0].set_ticks([0,1] * u.arcsec)
-    # ax[1].coords[0].coord_wrap = 180 * u.degree
-    # ax[1].coords[0].set_major_formatter('s.ss')
-    # ax[1].coords[1].set_major_formatter('s.ss')
-    ax[1].tick_params(axis='both', length=8, width=2, direction='in')
-
-    n_comp = len(fitlog)   # 成分数量
-    for i in range(n_comp):
-        # 世界坐标中心
-        ra_center = fitlog['LongICRS'][i]
-        dec_center = fitlog['LatICRS'][i]
-        ra_pix, dec_pix = wcs.all_world2pix(ra_center, dec_center, 0)
-
-        # convolved
-        conmaj = fitlog['ConMaj'][i] / pix2arcsec
-        conmin = fitlog['ConMin'][i] / pix2arcsec
-        conPA  = fitlog['ConPA'][i]
-
-        e_con = Ellipse(
-            xy=(ra_pix, dec_pix),
-            width=conmaj, height=conmin, angle=conPA + 90,
-            edgecolor='grey', linestyle='--', facecolor='none', lw=4,
-            label='convolved FWHM' if i == 0 else None
+    def add_panel_label(ax, label):
+        ax.text(
+            0.05, 0.95, label,
+            transform=ax.transAxes,
+            va='top', ha='left', fontsize=14, color='black',
+            bbox=dict(facecolor='white', alpha=0.72, edgecolor='none', pad=2.0)
         )
-        ax[1].add_patch(e_con)
 
-        # deconvolved
-        deconmaj = fitlog['DeconMaj'][i] / pix2arcsec
-        deconmin = fitlog['DeconMin'][i] / pix2arcsec
-        deconPA  = fitlog['DeconPA'][i]
-
-        e_decon = Ellipse(
-            xy=(ra_pix, dec_pix),
-            width=deconmaj, height=deconmin, angle=deconPA + 90,
-            edgecolor='black', linestyle='-', facecolor='none', lw=3,
-            label='deconvolved FWHM' if i == 0 else None
+    def add_beam_ellipse(ax):
+        bmaj = header.get('BMAJ', np.nan)
+        bmin = header.get('BMIN', np.nan)
+        bpa = header.get('BPA', 0.0)
+        try:
+            bmaj = float(bmaj) * 3600.0
+            bmin = float(bmin) * 3600.0
+            bpa = float(bpa)
+        except Exception:
+            return
+        if not np.isfinite(bmaj) or not np.isfinite(bmin) or bmaj <= 0 or bmin <= 0:
+            return
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        xpos = xlim[0] + 0.14 * (xlim[1] - xlim[0])
+        ypos = ylim[0] + 0.12 * (ylim[1] - ylim[0])
+        beam = Ellipse(
+            (xpos, ypos), width=bmaj, height=bmin, angle=imfit_pa_to_offset_angle(bpa),
+            facecolor='#1f77b4', edgecolor='red', lw=0.8, zorder=5
         )
-        ax[1].add_patch(e_decon)
+        ax.add_patch(beam)
 
-    # 图例（只显示一次标签）
-    ax[1].legend(fontsize=20, bbox_to_anchor=(0.98, 0.95), loc='upper right')
-    residual_map = real_img  - model_img
-    vmin = residual_map.min()
-    vmax = residual_map.max()
-    vset = max(np.abs(vmin),np.abs(vmax))
-    imshow3 = ax[2].imshow(residual_map,origin='lower',vmin=-vset,vmax=vset,cmap='bwr'#'bwr'
-                            ,interpolation='bicubic')#,cmap='Greys_r'
-    # 计算图像的均值和标准偏差
-    mean = np.mean(residual_map)
-    stddev = RMS
-    # 设置 σ 级别
-    sigma_levels = [0 + n * stddev for n in np.array([-3,-2,-1,1,2,3])]  # 1σ, 2σ, 3σ
-    # 添加等高线表示 1σ, 2σ, 3σ
-    color_set = np.array(['y','b','r','r','b','y'])
-    labels = np.array(['$3\sigma$','$2\sigma$','$1\sigma$','$1\sigma$','$2\sigma$','$3\sigma$'])
-    for index,level in enumerate(sigma_levels):
-        contour = ax[2].contour(residual_map, levels=[level], colors=color_set[index], linewidths=1, linestyles='dashed',label=labels[index])
-        custom_labels = [labels[index]]  # 可以根据需要自定义标签
+    with plt.rc_context(_scientific_plot_rc(labelsize=11, axes_labelsize=13)):
+        fig, ax = plt.subplots(1, 3, figsize=(12.0, 5.4), sharex=True, sharey=True)
+        fig.subplots_adjust(left=0.07, right=0.985, bottom=0.14, top=0.82, wspace=0.0)
 
-        # 添加等高线标签
-        ax[2].clabel(contour, inline=True, fontsize=10, fmt=dict(zip(contour.levels, custom_labels)))
+        vmax = np.nanmax(real_img)
+        if not np.isfinite(vmax) or vmax <= 0:
+            vmax = np.nanmax(model_img)
+        if not np.isfinite(vmax) or vmax <= 0:
+            vmax = max(RMS * 10, 1e-6)
+        norm1 = PowerNorm(gamma=0.5, vmin=0, vmax=vmax)
 
-        #clabels = plt.clabel(contour, inline=True, fontsize=15,use_clabeltext=True)  # 添加标签
-    wcsaxes.add_beam(ax=ax[2],header=header,pad=2,path_effects=[effect])
-    ax[2].text(0.02, 0.9,'Residual', transform=ax[2].transAxes, 
-    verticalalignment='top', horizontalalignment='left', fontsize=30,color='black')
+        imshow1 = ax[0].imshow(real_img, norm=norm1, origin='lower', cmap=cmap,
+                               alpha=1, interpolation='bicubic', extent=extent)
+        imshow2 = ax[1].imshow(model_img, norm=norm1, origin='lower', cmap=cmap,
+                               alpha=1, interpolation='bicubic', extent=extent)
 
-    w2h = ax[2].get_window_extent().width / ax[2].get_window_extent().height
-    ax3_divider = make_axes_locatable(ax[2])
-    # Add an Axes above the main Axes.
-    cax3 = ax3_divider.append_axes("top", size="{}%".format(1/(20 * w2h)*100), pad=0)
-    cb3 = fig.colorbar(imshow3,cax=cax3,orientation='horizontal')
-    cb3.ax.coords[1].default_label = ''
-    cb3.ax.coords[1].set_ticks_visible(False)
-    cb3.ax.coords[1].set_ticklabel_visible(False)
-    cb3.ax.coords[0].set_ticklabel_position('b')
-    cb3.ax.coords[0].set_ticks_position('b')
-    cb3.ax.coords.grid(False)
-    #cb1.ax.coords[0].set_ticks([10,100] * u.dimensionless_unscaled)
-    cb3.ax.coords[0].display_minor_ticks(True)
-    cb3.ax.coords[0].set_ticklabel(size=20,exclude_overlapping=True)
-    if np.floor(np.max(residual_map)) > 5:
-        ticks_res = np.linspace(np.ceil(-np.max(residual_map))+2,np.floor(np.max(residual_map))-2,7)
-    else:
-        ticks_res = np.linspace(np.ceil(-np.max(residual_map)),np.floor(np.max(residual_map)),7)
-    # cb3.ax.coords[0].set_ticks(ticks_res * u.dimensionless_unscaled,size=8)
-    #cb1.ax.coords[0].set_ticks([5,50,150] * u.dimensionless_unscaled,size=4)
+        residual_map = real_img - model_img
+        vset = np.nanmax(np.abs(residual_map))
+        if not np.isfinite(vset) or vset == 0:
+            vset = RMS if RMS > 0 else 1e-6
+        imshow3 = ax[2].imshow(residual_map, origin='lower', vmin=-vset, vmax=vset,
+                               cmap='bwr', interpolation='bicubic', extent=extent)
 
-    cb3.ax.coords[0].set_axislabel_position('t')
-    cb3.ax.coords[0].set_axislabel('Intensity (Jy/beam)',fontdict=font) #设置colorbar的标签字体及其大小
-    cb3.ax.tick_params(axis="both", which="major", width=2, length=8, direction='in')
+        for axis, label in zip(ax, ['Data', 'Model', 'Residual']):
+            add_panel_label(axis, label)
+            add_beam_ellipse(axis)
+            axis.tick_params(axis='both', which='both', direction='in', top=True, right=True)
+            axis.minorticks_on()
+            axis.xaxis.set_major_locator(MaxNLocator(4))
+            axis.yaxis.set_major_locator(MaxNLocator(4))
+            axis.set_aspect('equal', adjustable='box')
+        ax[0].set_ylabel('Dec. Offset (arcsec)')
+        ax[1].set_xlabel('R.A. Offset (arcsec)')
+        ax[1].tick_params(labelleft=False)
+        ax[2].tick_params(labelleft=False)
 
-    ax[2].set_xlabel('R.A. Offset')
-    ax[2].coords[0].display_minor_ticks(True)
-    ax[2].coords[1].set_ticks_position('l')
-    ax[2].coords[0].set_ticks_position('b')
-    ax[2].coords[1].default_label = ''
-    ax[2].coords[1].display_minor_ticks(True)
-    ax[2].coords[1].set_ticks_visible(True)
-    ax[2].coords[1].set_ticklabel_visible(False)
-    # ax[2].coords[0].coord_wrap = 180 * u.degree
-    # ax[2].coords[0].set_major_formatter('s.ss')
-    # ax[2].coords[1].set_major_formatter('s.ss')
-    ax[2].tick_params(axis='both', length=8, width=2,direction='in')
-    # print(real_img,'\n',model_img)
+        n_comp = len(fitlog)
+        for i in range(n_comp):
+            try:
+                ra_center = float(fitlog['LongICRS'][i])
+                dec_center = float(fitlog['LatICRS'][i])
+            except Exception:
+                continue
+            if not np.isfinite(ra_center) or not np.isfinite(dec_center):
+                continue
+            try:
+                ra_pix, dec_pix = wcs.all_world2pix(ra_center, dec_center, 0)
+            except Exception:
+                continue
+            x_fit, y_fit = pixel_to_offset(ra_pix, dec_pix)
 
-    if box_region is not None:
-        items = box_region.split(',')
-        items_stripped = [item.strip() for item in items]
-        numbers = [float(item) for item in items_stripped]
-        x1, y1, x2, y2 = numbers
-        box = Rectangle((x1, y1), x2 - x1, y2 - y1, edgecolor='black', facecolor='none', lw=1.5)
-        ax[0].add_patch(box)
-        box = Rectangle((x1, y1), x2 - x1, y2 - y1, edgecolor='black', facecolor='none', lw=1.5)
-        ax[1].add_patch(box)
-        box = Rectangle((x1, y1), x2 - x1, y2 - y1, edgecolor='black', facecolor='none', lw=1.5)
-        ax[2].add_patch(box)
+            try:
+                conmaj = float(fitlog['ConMaj'][i])
+                conmin = float(fitlog['ConMin'][i])
+                conPA = float(fitlog['ConPA'][i])
+            except Exception:
+                conmaj = conmin = conPA = np.nan
+            if np.isfinite(conmaj) and np.isfinite(conmin) and conmaj > 0 and conmin > 0:
+                e_con = Ellipse(
+                    xy=(x_fit, y_fit), width=conmaj, height=conmin, angle=imfit_pa_to_offset_angle(conPA),
+                    edgecolor='0.45', linestyle='--', facecolor='none', lw=2.0,
+                    label='convolved FWHM' if i == 0 else None
+                )
+                ax[1].add_patch(e_con)
 
-    if id_slice is not None:
-        idx,idy = id_slice
-        ax[0].plot(idy, idx, marker='x', color='black', markersize=8, linestyle='None', markeredgewidth=2)
-        ax[1].plot(idy, idx, marker='x', color='black', markersize=8, linestyle='None', markeredgewidth=2)
-        ax[2].plot(idy, idx, marker='x', color='black', markersize=8, linestyle='None', markeredgewidth=2)
-        ax[0].axhline(y=idx, color='black', linestyle=':', linewidth=1)
-        ax[0].axvline(x=idy, color='black', linestyle=':', linewidth=1)
-        ax[1].axhline(y=idx, color='black', linestyle=':', linewidth=1)
-        ax[1].axvline(x=idy, color='black', linestyle=':', linewidth=1)
-        ax[2].axhline(y=idx, color='black', linestyle=':', linewidth=1)
-        ax[2].axvline(x=idy, color='black', linestyle=':', linewidth=1)
+            try:
+                deconmaj = float(fitlog['DeconMaj'][i])
+                deconmin = float(fitlog['DeconMin'][i])
+                deconPA = float(fitlog['DeconPA'][i])
+            except Exception:
+                deconmaj = deconmin = deconPA = np.nan
+            if np.isfinite(deconmaj) and np.isfinite(deconmin) and deconmaj > 0 and deconmin > 0:
+                e_decon = Ellipse(
+                    xy=(x_fit, y_fit), width=deconmaj, height=deconmin, angle=imfit_pa_to_offset_angle(deconPA),
+                    edgecolor='black', linestyle='-', facecolor='none', lw=1.8,
+                    label='deconvolved FWHM' if i == 0 else None
+                )
+                ax[1].add_patch(e_decon)
 
+        handles, labels = ax[1].get_legend_handles_labels()
+        if handles:
+            ax[1].legend(handles, labels, fontsize=9, loc='upper right', frameon=True,
+                         borderpad=0.3, handlelength=1.8)
 
+        sigma_levels = [n * RMS for n in np.array([-3, -2, -1, 1, 2, 3])]
+        contour_colors = np.array(['gold', 'blue', 'red', 'red', 'blue', 'gold'])
+        contour_labels = np.array(['$-3\\sigma$', '$-2\\sigma$', '$-1\\sigma$',
+                                   '$1\\sigma$', '$2\\sigma$', '$3\\sigma$'])
+        xx, yy = np.meshgrid(x_offsets, y_offsets)
+        for index, level in enumerate(sigma_levels):
+            if not np.isfinite(level) or level <= np.nanmin(residual_map) or level >= np.nanmax(residual_map):
+                continue
+            contour = ax[2].contour(xx, yy, residual_map, levels=[level],
+                                    colors=contour_colors[index], linewidths=0.8,
+                                    linestyles='dashed')
+            ax[2].clabel(contour, inline=True, fontsize=6,
+                         fmt=dict(zip(contour.levels, [contour_labels[index]])))
+
+        if box_region is not None:
+            try:
+                numbers = [float(item.strip()) for item in box_region.split(',')]
+                if len(numbers) == 4:
+                    x1, y1, x2, y2 = numbers
+                    xo1, yo1 = pixel_to_offset(x1, y1)
+                    xo2, yo2 = pixel_to_offset(x2, y2)
+                    for axis in ax:
+                        box = Rectangle(
+                            (min(xo1, xo2), min(yo1, yo2)),
+                            abs(xo2 - xo1), abs(yo2 - yo1),
+                            edgecolor='black', facecolor='none', lw=1.2
+                        )
+                        axis.add_patch(box)
+            except Exception:
+                pass
+
+        if id_slice is not None:
+            idx, idy = id_slice
+            x_slice, y_slice = pixel_to_offset(idy, idx)
+            for axis in ax:
+                axis.plot(x_slice, y_slice, marker='x', color='black', markersize=5,
+                          linestyle='None', markeredgewidth=1.2)
+                axis.axhline(y=y_slice, color='black', linestyle=':', linewidth=0.8)
+                axis.axvline(x=x_slice, color='black', linestyle=':', linewidth=0.8)
+
+        pos0 = ax[0].get_position()
+        pos1 = ax[1].get_position()
+        pos2 = ax[2].get_position()
+        cbar_height = 0.026
+        cbar_pad = 0.018
+        cax12 = fig.add_axes([pos0.x0, pos0.y1 + cbar_pad, pos1.x1 - pos0.x0, cbar_height])
+        cb12 = fig.colorbar(imshow1, cax=cax12, orientation='horizontal')
+        cb12.set_label('Intensity (Jy/beam)', fontsize=11)#, color='darkred')
+        cb12.ax.xaxis.set_ticks_position('top')
+        cb12.ax.xaxis.set_label_position('top')
+        cb12.ax.tick_params(axis='x', which='both', direction='in', labelsize=9,
+                            top=True, bottom=False, labeltop=True, labelbottom=False)
+        cb12.locator = MaxNLocator(4)
+        cb12.update_ticks()
+
+        cax3 = fig.add_axes([pos2.x0, pos2.y1 + cbar_pad, pos2.width, cbar_height])
+        cb3 = fig.colorbar(imshow3, cax=cax3, orientation='horizontal')
+        cb3.set_label('Residual (Jy/beam)', fontsize=11)#, color='darkred')
+        cb3.ax.xaxis.set_ticks_position('top')
+        cb3.ax.xaxis.set_label_position('top')
+        cb3.ax.tick_params(axis='x', which='both', direction='in', labelsize=9,
+                           top=True, bottom=False, labeltop=True, labelbottom=False)
+        cb3.locator = MaxNLocator(5)
+        cb3.update_ticks()
 
     plt.show()
     return fig
-
 
 
 def fwhm_to_sigma(fwhm):
@@ -3140,104 +3150,111 @@ def plot_gauss_slices_astropy(real_img, model_img, wcs, pix2arcsec, log, axis='x
     ny, nx = real_img.shape
     x = np.arange(nx)
     y = np.arange(ny)
-    
-    # 处理 box_region
+
     def get_box_coords(box_region):
         if box_region is None:
             return None
         try:
-            items = box_region.split(',')
-            items_stripped = [item.strip() for item in items]
-            numbers = [float(item) for item in items_stripped]
+            numbers = [float(item.strip()) for item in box_region.split(',')]
             if len(numbers) == 4:
                 return numbers
-            else:
-                return None
         except Exception:
             return None
+        return None
 
     box_coords = get_box_coords(box_region)
-    # box_coords = [x1, y1, x2, y2] if valid else None
+
+    def style_slice_axis(ax):
+        ax.tick_params(axis='both', which='both', direction='in', top=True, right=True)
+        ax.minorticks_on()
+        ax.grid(alpha=0.18, lw=0.6)
+        ax.legend(fontsize=8, loc='upper left', frameon=True, borderpad=0.3,
+                  handlelength=2.0, labelspacing=0.25)
+        ax.set_ylabel('Intensity (Jy/beam)')
 
     def plot_slice(ax, axis, idx, real_img, model_img, log, wcs, pix2arcsec, box_coords):
         if axis == 'x':
             pos = 'y'
+            coord = x
             slice_real = real_img[idx, :]
             slice_model = model_img[idx, :]
-            ax.plot(x, slice_real, 'k-', label='Real Data')
-            ax.plot(x, slice_model, 'b-', label='Model Img')
+            box_lines = None if box_coords is None else box_coords[0:4:2]
+            xlabel = 'x (pixel)'
         else:
             pos = 'x'
+            coord = y
             slice_real = real_img[:, idx]
             slice_model = model_img[:, idx]
-            ax.plot(y, slice_real, 'k-', label='Real Data')
-            ax.plot(y, slice_model, 'b-', label='Model Img')
+            box_lines = None if box_coords is None else box_coords[1:4:2]
+            xlabel = 'y (pixel)'
+
+        ax.plot(coord, slice_real, color='black', lw=1.4, label='Real Data')
+        ax.plot(coord, slice_model, color='royalblue', lw=1.4, label='Model Img')
 
         n_comp = len(log['Peak'])
         total_model = np.zeros_like(model_img)
         model_comp = []
         total_model_slice = np.zeros_like(slice_real)
         for i in range(n_comp):
-            amp = log['Peak'][i]
-            ra_center = log['LongICRS'][i]
-            dec_center = log['LatICRS'][i]
-            ra_pix, dec_pix = wcs.all_world2pix(ra_center, dec_center, 0)
-            sigma_x = fwhm_to_sigma(log['ConMaj'][i]) / pix2arcsec
-            sigma_y = fwhm_to_sigma(log['ConMin'][i]) / pix2arcsec
-            theta = np.deg2rad(log['ConPA'][i])  # astropy用弧度
-
+            try:
+                amp = float(log['Peak'][i])
+                ra_center = float(log['LongICRS'][i])
+                dec_center = float(log['LatICRS'][i])
+                sigma_x = fwhm_to_sigma(float(log['ConMaj'][i])) / pix2arcsec
+                sigma_y = fwhm_to_sigma(float(log['ConMin'][i])) / pix2arcsec
+                theta = np.deg2rad(float(log['ConPA'][i]))
+            except Exception:
+                continue
+            if not np.all(np.isfinite([amp, ra_center, dec_center, sigma_x, sigma_y, theta])):
+                continue
+            try:
+                ra_pix, dec_pix = wcs.all_world2pix(ra_center, dec_center, 0)
+            except Exception:
+                continue
             gauss_model = Gaussian2D(amplitude=amp, x_mean=ra_pix, y_mean=dec_pix,
                                      x_stddev=sigma_x, y_stddev=sigma_y, theta=theta + np.pi/2)
             xs, ys = np.meshgrid(x, y)
             gauss_img = gauss_model(xs, ys)
             if axis == 'x':
                 gauss_slice = gauss_img[idx, :]
-                ax.plot(x, gauss_slice, '--', label=f'Comp {i+1}')
             else:
                 gauss_slice = gauss_img[:, idx]
-                ax.plot(y, gauss_slice, '--', label=f'Comp {i+1}')
+            ax.plot(coord, gauss_slice, '--', lw=1.0, label=f'Comp {i+1}')
             total_model_slice += gauss_slice
             total_model += gauss_img
             model_comp.append(gauss_img)
 
-        # 总模型
-        if axis == 'x':
-            ax.plot(x, total_model_slice, 'r:', lw=2, label='Model Total')
-            ax.set_xlabel('x')
-            # 画虚线（竖线）在 x1,x2 处
-            if box_coords is not None:
-                x1, y1, x2, y2 = box_coords
-                ax.axvline(x1, color='k', linestyle='--')
-                ax.axvline(x2, color='k', linestyle='--')
-        else:
-            ax.plot(y, total_model_slice, 'r:', lw=2, label='Model Total')
-            ax.set_xlabel('y')
-            # 画虚线（竖线）在 y1,y2 处
-            if box_coords is not None:
-                x1, y1, x2, y2 = box_coords
-                ax.axvline(y1, color='k', linestyle='--')
-                ax.axvline(y2, color='k', linestyle='--')
+        ax.plot(coord, total_model_slice, color='red', linestyle=':', lw=1.8, label='Model Total')
+        ax.set_xlabel(xlabel)
+        if box_lines is not None:
+            for xpos in box_lines:
+                ax.axvline(xpos, color='black', linestyle='--', lw=1.0)
         if logscale:
             ax.set_yscale('log')
-            ax.set_ylim(bottom=np.median(real_img) / 10)
-        ax.legend()
-        ax.set_title(f'Slice at {pos}={idx} (Astropy Gaussian2D)')
+            bottom = np.nanmedian(real_img) / 10
+            if np.isfinite(bottom) and bottom > 0:
+                ax.set_ylim(bottom=bottom)
+        ax.set_title(f'Slice at {pos}={idx}', fontsize=12, pad=8)
+        style_slice_axis(ax)
         return total_model, model_comp
 
-    if axis in ['x', 'y']:
-        fig, ax = plt.subplots(figsize=(7, 5))
-        total_model, model_comp = plot_slice(ax, axis, idx if axis=='x' else idy, real_img, model_img, log, wcs, pix2arcsec, box_coords)
-        plt.show()
-        return total_model, model_comp, fig
-    elif axis == 'both':
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        total_model_x, model_comp_x = plot_slice(axes[0], 'x', idx, real_img, model_img, log, wcs, pix2arcsec, box_coords)
-        total_model_y, model_comp_y = plot_slice(axes[1], 'y', idy, real_img, model_img, log, wcs, pix2arcsec, box_coords)
-        plt.tight_layout()
-        plt.show()
-        # return {"x": (total_model_x, model_comp_x), "y": (total_model_y, model_comp_y), "fig": fig}
-        return total_model_x, model_comp_x, total_model_y, model_comp_y, fig
-    
+    with plt.rc_context(_scientific_plot_rc(labelsize=11, axes_labelsize=12)):
+        if axis in ['x', 'y']:
+            fig, ax = plt.subplots(figsize=(6.8, 4.6))
+            total_model, model_comp = plot_slice(ax, axis, idx if axis=='x' else idy, real_img, model_img, log, wcs, pix2arcsec, box_coords)
+            fig.tight_layout()
+            plt.show()
+            return total_model, model_comp, fig
+        elif axis == 'both':
+            fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), sharey=True)
+            total_model_x, model_comp_x = plot_slice(axes[0], 'x', idx, real_img, model_img, log, wcs, pix2arcsec, box_coords)
+            total_model_y, model_comp_y = plot_slice(axes[1], 'y', idy, real_img, model_img, log, wcs, pix2arcsec, box_coords)
+            axes[1].set_ylabel('')
+            axes[1].tick_params(labelleft=False)
+            fig.tight_layout(w_pad=1.8)
+            plt.show()
+            return total_model_x, model_comp_x, total_model_y, model_comp_y, fig
+
 def sum_circle_with_plot(fits_file, fitlog_file, fitlog_summary_file, rms_noise, sigma_level=3, cmap=hue_sat_value2_cmap):
     """
     Perform sum_circle photometry and plot the aperture on the image.
@@ -3459,6 +3476,8 @@ def casa_imfit_manually(fits_url,base_instance,manual_estimate=None,show_fitting
         figname2 = fig_basename + '_slice.png'
         fig_residual.savefig(os.path.join(savepath,figname1),dpi=300,bbox_inches = 'tight')
         fig_slice.savefig(os.path.join(savepath,figname2),dpi=300,bbox_inches = 'tight')
+        plt.close(fig_residual)
+        plt.close(fig_slice)
 
     if sum_circle:
         flux, flux_err = sum_circle_with_plot(

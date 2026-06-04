@@ -15,11 +15,12 @@ from matplotlib.colors import LogNorm,PowerNorm
 from matplotlib.patches import Ellipse,Rectangle,Circle
 from sedcreator import SedFluxer
 import matplotlib.image as mpimg
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
 import pandas as pd
 
 # 引入你的基础类和相关辅助函数 (假设在此同一目录下)
-from .Formation_Cluster import Formation_Cluster, create_cutout_from_coords, casa_imfit_manually, replace_fits_data
+from .Formation_Cluster import Formation_Cluster, create_cutout_from_coords, casa_imfit_manually, replace_fits_data, _scientific_plot_rc
 
 #基本颜色映射
 # 读取图片
@@ -377,66 +378,127 @@ class BatchImfitter:
 
                 # =================== 画图模块 ===================
                 if show_plots:
-                    # 根据是否使用 Rmb05 动态分配画布行数和高度
                     nrows = 2 if has_rbm05 else 1
-                    fig_height = 12 if has_rbm05 else 6
-                    
-                    fig, axes = plt.subplots(nrows, 3, figsize=(18, fig_height))
-                    
-                    # 如果只有 1 行，plt.subplots 给出的是 1D 数组 [ax1, ax2, ax3]
-                    # 为了统一 axes[0] 和 axes[1] 的调用口补一个维度外壳
-                    axes_2d = axes if has_rbm05 else [axes]
-                    
-                    # 准备 Colormap
-                    current_cmap = plt.cm.jet.copy() if cmap is None else cmap.copy()
-                    current_cmap.set_under(current_cmap(0.0))
-                    current_cmap.set_over(current_cmap(1.0))
+                    ncols = 3
 
-                    # --- 定义单行绘图逻辑 (内部帮助函数) ---
-                    def plot_single_row(ax_row, cutout_obj, bgmap_arr, fit_params, title_prefix):
-                        ax1, ax2, ax3 = ax_row
-                        
-                        vmax = np.nanmax(cutout_obj.data)
-                        if vmax <= 0: vmax = 1e-3
-                        norm = LogNorm(vmin=1e-5, vmax=vmax)
+                    with plt.rc_context(_scientific_plot_rc(labelsize=10, axes_labelsize=11)):
+                        fig, axes = plt.subplots(
+                            nrows, ncols, figsize=(13.5, 4.3 * nrows),
+                            sharex=True, sharey=True, constrained_layout=False
+                        )
+                        axes_2d = np.atleast_2d(axes)
+                        fig.subplots_adjust(left=0.06, right=0.905, bottom=0.08, top=0.97,
+                                            wspace=0.0, hspace=0.0)
 
-                        # Subplot 1: 原始数据
-                        im1 = ax1.imshow(cutout_obj.data, origin='lower', cmap=current_cmap, norm=norm)
-                        ax1.set_title(f"{title_prefix}\nOriginal Data", fontsize=10)
+                        current_cmap = plt.cm.jet.copy() if cmap is None else cmap.copy()
+                        current_cmap.set_under(current_cmap(0.0))
+                        current_cmap.set_over(current_cmap(1.0))
 
-                        # Subplot 2: 背景模型 + Mask椭圆
-                        im2 = ax2.imshow(bgmap_arr, origin='lower', cmap=current_cmap, norm=norm)
-                        ax2.set_title("Background Model + Mask", fontsize=10)
-                        
-                        if fit_params is not None:
-                            ellipse_mask = Ellipse(
-                                xy=(fit_params['ra_pix'], fit_params['dec_pix']), 
-                                width=fit_params['conmaj_sigma'] * 4, 
-                                height=fit_params['conmin_sigma'] * 4,
-                                angle=90 + fit_params['conPA'], 
-                                edgecolor='black', facecolor='none', linewidth=2.0
-                            )   
-                            ax2.add_patch(ellipse_mask)
+                        def add_panel_text(ax, text):
+                            ax.text(
+                                0.05, 0.95, text, transform=ax.transAxes,
+                                va='top', ha='left', fontsize=10, color='black',
+                                bbox=dict(facecolor='white', alpha=0.72, edgecolor='none', pad=2.0)
+                            )
 
-                        # Subplot 3: 扣除背景后的数据
-                        subtracted_data = cutout_obj.data - bgmap_arr
-                        im3 = ax3.imshow(subtracted_data, origin='lower', cmap=current_cmap, norm=norm)
-                        ax3.set_title("Background Subtracted", fontsize=10)
+                        def style_joined_axis(ax, row_idx, col_idx):
+                            is_bottom = row_idx == nrows - 1
+                            is_left = col_idx == 0
 
-                        fig.colorbar(im3, ax=ax_row.tolist(), orientation='horizontal', fraction=0.07, pad=0.1, extend='both')
+                            ax.set_aspect('equal', adjustable='box')
+                            ax.minorticks_on()
+                            ax.tick_params(
+                                axis='x', which='both', direction='in',
+                                top=True, bottom=True,
+                                labeltop=False, labelbottom=is_bottom
+                            )
+                            ax.tick_params(
+                                axis='y', which='both', direction='in',
+                                left=True, right=True,
+                                labelleft=is_left, labelright=False
+                            )
 
-                    # --- 绘制第一行: Normal ---
-                    params_n = fit_params_normal if 'fit_params_normal' in locals() else None
-                    title_norm = getattr(fc_norm, 'filename', 'Normal') 
-                    plot_single_row(axes_2d[0], cutout_normal, bgmap_normal, params_n, f"Normal: {title_norm}")
+                            # Keep the full in-panel frame and inward ticks on every panel.
+                            for spine in ax.spines.values():
+                                spine.set_visible(True)
 
-                    # --- 绘制第二行: Rmb05 ---
-                    if has_rbm05:
-                        params_r = fit_params_rbm05 if 'fit_params_rbm05' in locals() else None
-                        title_rbm = getattr(fc_rbm05, 'filename', 'Rmb05')
-                        plot_single_row(axes_2d[1], cutout_rbm05, bgmap_rbm05, params_r, f"Rmb05: {title_rbm}")
+                            ax.set_xlabel('Pixel offset' if is_bottom else '')
+                            ax.set_ylabel('Pixel offset' if is_left else '')
 
-                    plt.tight_layout()
+                        def add_row_colorbar(ax, image):
+                            fig.canvas.draw()
+                            ax_pos = ax.get_position().frozen()
+
+                            divider = make_axes_locatable(ax)
+                            cax = divider.append_axes('right', size='3%', pad=0.02)
+
+                            # Freeze the image panel after creating the divider; otherwise
+                            # append_axes compresses the third column and breaks alignment.
+                            ax.set_axes_locator(None)
+                            ax.set_position(ax_pos)
+                            cax.set_axes_locator(None)
+
+                            pad = 0.02 / fig.get_size_inches()[0]
+                            cbar_width = max(ax_pos.width * 0.03, 0.006)
+                            cax.set_position([ax_pos.x1 + pad, ax_pos.y0, cbar_width, ax_pos.height])
+
+                            cbar = fig.colorbar(image, cax=cax, orientation='vertical', extend='both')
+                            cbar.set_label('Intensity (Jy/beam)', fontsize=10)
+                            cbar.ax.tick_params(axis='y', which='both', direction='in', labelsize=9)
+
+                        # --- 定义单行绘图逻辑 (内部帮助函数) ---
+                        def plot_single_row(ax_row, cutout_obj, bgmap_arr, fit_params, row_label, row_idx):
+                            ax1, ax2, ax3 = ax_row
+
+                            vmax = np.nanmax(cutout_obj.data)
+                            if not np.isfinite(vmax) or vmax <= 0:
+                                vmax = 1e-3
+                            norm = LogNorm(vmin=1e-5, vmax=vmax)
+
+                            ny, nx = cutout_obj.data.shape
+                            x_center = 0.5 * (nx - 1)
+                            y_center = 0.5 * (ny - 1)
+                            extent = [
+                                -0.5 - x_center, nx - 0.5 - x_center,
+                                -0.5 - y_center, ny - 0.5 - y_center,
+                            ]
+
+                            im1 = ax1.imshow(cutout_obj.data, origin='lower', cmap=current_cmap,
+                                             norm=norm, extent=extent)
+                            im2 = ax2.imshow(bgmap_arr, origin='lower', cmap=current_cmap,
+                                             norm=norm, extent=extent)
+
+                            if fit_params is not None:
+                                ellipse_mask = Ellipse(
+                                    xy=(fit_params['ra_pix'] - x_center, fit_params['dec_pix'] - y_center),
+                                    width=fit_params['conmaj_sigma'] * 4,
+                                    height=fit_params['conmin_sigma'] * 4,
+                                    angle=90 + fit_params['conPA'],
+                                    edgecolor='black', facecolor='none', linewidth=1.4
+                                )
+                                ax2.add_patch(ellipse_mask)
+
+                            subtracted_data = cutout_obj.data - bgmap_arr
+                            im3 = ax3.imshow(subtracted_data, origin='lower', cmap=current_cmap,
+                                             norm=norm, extent=extent)
+
+                            add_panel_text(ax1, f'{row_label}\nOriginal Data')
+                            add_panel_text(ax2, f'{row_label}\nBackground Model + Mask')
+                            add_panel_text(ax3, f'{row_label}\nBackground Subtracted')
+
+                            for col_idx, ax_this in enumerate(ax_row):
+                                style_joined_axis(ax_this, row_idx, col_idx)
+
+                            add_row_colorbar(ax3, im3)
+
+                        # --- 绘制第一行: Normal ---
+                        params_n = fit_params_normal if 'fit_params_normal' in locals() else None
+                        plot_single_row(axes_2d[0], cutout_normal, bgmap_normal, params_n, 'Normal', 0)
+
+                        # --- 绘制第二行: Rmb05 ---
+                        if has_rbm05:
+                            params_r = fit_params_rbm05 if 'fit_params_rbm05' in locals() else None
+                            plot_single_row(axes_2d[1], cutout_rbm05, bgmap_rbm05, params_r, 'Rmb05', 1)
 
                     # --- 保存合并后的图像 ---
                     # if self.results_dir is not None:
@@ -445,6 +507,7 @@ class BatchImfitter:
                         save_name = clustername + f'_source_{i+1}_maskbg_normal_rbm05.png' if has_rbm05 else clustername + f'_source_{i+1}_maskbg_normal.png'
                         save_full_path = os.path.join(output_dir_result_src, save_name)
                         fig.savefig(save_full_path, dpi=300, bbox_inches='tight')
+                        plt.close(fig)
 
                 replace_file_path_normal = save_path_norm.replace('.fits','_bgmap.fits')
                 replace_fits_data(
