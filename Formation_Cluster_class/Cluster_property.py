@@ -356,6 +356,12 @@ class Cluster_Property:
         imfit_flux_err_array_pbcor = self.imfit_flux_err_array * cor_ratio_array
         self.imfit_flux_array_pbcor = imfit_flux_array_pbcor
         self.imfit_flux_err_array_pbcor = imfit_flux_err_array_pbcor
+        self.peak_intensity_array_uncorrected = self.peak_intensity_array
+        self.peak_intensity_err_array_uncorrected = self.peak_intensity_err_array
+        peak_intensity_array_pbcor = self.peak_intensity_array * cor_ratio_array
+        peak_intensity_err_array_pbcor = self.peak_intensity_err_array * cor_ratio_array
+        self.peak_intensity_array = peak_intensity_array_pbcor
+        self.peak_intensity_err_array = peak_intensity_err_array_pbcor
         ins_maxflux = np.nanargmax(imfit_flux_array_pbcor)
         ra_center = self.ra_array[ins_maxflux]
         dec_center = self.dec_array[ins_maxflux]

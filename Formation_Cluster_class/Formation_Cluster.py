@@ -2840,7 +2840,7 @@ def plot_residual_new(real_img,model_img,fitlog,header,wcs,pix2arcsec,RMS,cmap=h
 
     # 计算指数范围
     vmin = RMS * 3
-    vmax = real_img.max()
+    vmax = np.nanmax(real_img) #real_img.max()
     min_exp = int(np.floor(np.log10(vmin)))
     max_exp = int(np.ceil(np.log10(vmax)))
 
@@ -3122,7 +3122,7 @@ def plot_gauss_slices_astropy_old(real_img,model_img, wcs, pix2arcsec ,log, axis
         plt.plot(y, total_model_slice, 'r:', lw=2, label='Model Total')
         plt.xlabel('y')
 
-    if real_img.max() >= 50 * np.median(real_img):
+    if  np.nanmax(real_img) >= 50 * np.median(real_img):  #real_img.max()
         plt.yscale('log')
         plt.ylim(bottom=np.median(real_img) / 10)
     plt.legend()

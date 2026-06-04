@@ -209,8 +209,8 @@ class BatchImfitter:
                     aper_rad = 3 * sigma_pix * instance_obj.PIXEL_SCALE.value 
                     
                     flux_obj = fluxer.get_flux(central_coords, aper_rad, aper_rad, aper_rad*2)
-                    if show_plots:
-                        flux_obj.plot(cmap='jet') 
+                    # if show_plots:
+                    #     flux_obj.plot(cmap='jet') 
                     
                     # 写入数组
                     flux_arr[array_idx] = flux_obj.flux_bkgsub 
@@ -255,8 +255,8 @@ class BatchImfitter:
                         aper_rad = 3 * sigma_pix * instance_obj.PIXEL_SCALE.value 
                         
                         flux_obj = fluxer.get_flux(central_coords, aper_rad, aper_rad, aper_rad*2)
-                        if show_plots:
-                            flux_obj.plot(cmap='jet') 
+                        # if show_plots:
+                        #     flux_obj.plot(cmap='jet') 
                         
                         flux_arr[array_idx] = flux_obj.flux_bkgsub 
                         flux_err_arr[array_idx] = flux_obj.fluc_error
@@ -643,8 +643,8 @@ class BatchImfitter:
                     aper_rad = 3 * sigma_pix * instance_this.PIXEL_SCALE.value # 3 sigma circle
                     
                     flux_obj = fluxer.get_flux(central_coords, aper_rad, aper_rad, aper_rad*2)
-                    if show_plots:
-                        flux_obj.plot(cmap='jet') # 原代码写死 jet
+                    # if show_plots:
+                    #     flux_obj.plot(cmap='jet') # 原代码写死 jet
                         
                     # sum_flux_array[idx] = flux_obj.flux_bkgsub # 注意使用 idx
                     # sum_flux_err_array[idx] = flux_obj.fluc_error
