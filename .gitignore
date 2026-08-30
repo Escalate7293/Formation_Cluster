@@ -7,7 +7,12 @@ __pycache__/
 *.pyc
 
 # Output folders
-examples/test_output_G034/
+# examples/test_output_G034/
 
 # macOS
 .DS_Store
+
+# CASA and generated runtime products
+casa-*.log
+examples/test_output_*/
+work_dir_mass_scale*/

@@ -6,7 +6,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import astropy.units as u
-from astropy.stats import mad_std
+from astropy.stats import mad_std, sigma_clipped_stats
 from matplotlib.colors import LinearSegmentedColormap
 from photutils.aperture import EllipticalAperture
 from photutils.background import Background2D
@@ -98,6 +98,8 @@ class BatchImfitter:
             'LOCAL_mad_std': np.zeros(num_sources),
             'LOCAL_complex_bool': np.zeros(num_sources, dtype=bool),
             'SNR_normal': np.zeros(num_sources),
+            'SNR_complex': np.full(num_sources, np.nan),
+            'SNR_complex_local': np.full(num_sources, np.nan),
             'Sum_Flux_normal': np.zeros(num_sources),
             'Sum_Flux_err_normal': np.zeros(num_sources),
         }
@@ -509,10 +511,11 @@ class BatchImfitter:
                         fig.savefig(save_full_path, dpi=300, bbox_inches='tight')
                         plt.close(fig)
 
+                bgsub_normal = cutout_normal.data - bgmap_normal
                 replace_file_path_normal = save_path_norm.replace('.fits','_bgmap.fits')
                 replace_fits_data(
                     original_fits_path=save_path_norm,
-                    new_data=cutout_normal.data - bgmap_normal,
+                    new_data=bgsub_normal,
                     output_path=replace_file_path_normal
                 )
 
@@ -549,6 +552,40 @@ class BatchImfitter:
                         savepath=output_dir_result_src, #self.results_dir,
                         fig_basename=clustername + f'_source_{i+1}_maskbg_sub_normal'
                     )
+
+                try:
+                    fit_row = log_normal.iloc[0]
+                    peak_complex = float(fit_row['Peak'])
+                    if np.isfinite(peak_complex) and np.isfinite(std_normal) and std_normal > 0:
+                        results['SNR_complex'][i] = peak_complex / std_normal
+                    conmaj_sigma = (
+                        float(fit_row['ConMaj'])
+                        / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+                        / fc_norm.PIXEL_SCALE.value
+                    )
+                    conmin_sigma = (
+                        float(fit_row['ConMin'])
+                        / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+                        / fc_norm.PIXEL_SCALE.value
+                    )
+                    source_x, source_y = cutout_normal.wcs.celestial.all_world2pix(
+                        float(fit_row['LongICRS']), float(fit_row['LatICRS']), 0
+                    )
+                    source_aperture = EllipticalAperture(
+                        (source_x, source_y),
+                        3.0 * conmaj_sigma,
+                        3.0 * conmin_sigma,
+                        np.radians(float(fit_row['ConPA']) + 90.0),
+                    )
+                    source_mask = source_aperture.to_mask().to_image(bgsub_normal.shape).astype(bool)
+                    noise_pixels = bgsub_normal[np.isfinite(bgsub_normal) & ~source_mask]
+                    _, _, std_complex = sigma_clipped_stats(
+                        noise_pixels, sigma=3.0, maxiters=None
+                    )
+                    if np.isfinite(peak_complex) and np.isfinite(std_complex) and std_complex > 0:
+                        results['SNR_complex_local'][i] = peak_complex / std_complex
+                except Exception as exc:
+                    print(f"[{clustername}] source {i + 1} complex SNR failed: {exc}")
 
                 results['IMFIT_logs_norm'].append(log_normal)
                 results['LOCAL_mad_std'][i] = std_surrounding_normal
@@ -714,11 +751,22 @@ class BatchImfitter:
                     sum_flux_array[idx] = flux_obj.flux_bkgsub # 注意使用 idx
                     sum_flux_err_array[idx] = flux_obj.fluc_error
                     return None
-                
-                sum_flux_sedfluxer(save_path_norm, fc_norm, results['Sum_Flux_normal'], results['Sum_Flux_err_normal'], i)
-                if has_rbm05:
-                    sum_flux_sedfluxer(save_path_rbm05, fc_rbm05, results['Sum_Flux_rbm05'], results['Sum_Flux_err_rbm05'], i)
 
+                try:
+                    sum_flux_sedfluxer(save_path_norm, fc_norm, results['Sum_Flux_normal'], results['Sum_Flux_err_normal'], i)
+                # except:
+                except Exception as exc:
+                    print(f"[{clustername}] source {i + 1} normal aperture failed: {exc}")
+                    results['Sum_Flux_normal'][i] = 0.0
+                    results['Sum_Flux_err_normal'][i] = 0.0
+                if has_rbm05:
+                    try:
+                        sum_flux_sedfluxer(save_path_rbm05, fc_rbm05, results['Sum_Flux_rbm05'], results['Sum_Flux_err_rbm05'], i)
+                    # except:
+                    except Exception as exc:
+                        print(f"[{clustername}] source {i + 1} rbm05 aperture failed: {exc}")
+                        results['Sum_Flux_rbm05'][i] = 0.0
+                        results['Sum_Flux_err_rbm05'][i] = 0.0
                 # sum_bool_array[idx] = 1
                 results['LOCAL_complex_bool'][i] = 0  # 标记为背景简单
                 results['LOCAL_mad_std'][i] = std_surrounding_normal  # 以normal的背景为标准
@@ -752,6 +800,8 @@ class BatchImfitter:
             'LOCAL_complex_bool': self.results['LOCAL_complex_bool'],
             'LOCAL_mad_std': self.results['LOCAL_mad_std'],
             'SNR_normal': self.results['SNR_normal'],
+            'SNR_complex': self.results['SNR_complex'],
+            'SNR_complex_local': self.results['SNR_complex_local'],
         }
         
         # 构建 normal 表格数据
@@ -774,9 +824,16 @@ class BatchImfitter:
         norm_data['imfit_dec_err'] = np.zeros(len(self.results['RA']))
         norm_data['validfit_flag'] = np.zeros(len(self.results['RA']), dtype=int)  # 0: invalid, 1: valid
 
+
+        required_fit_fields = ["I", "Peak", "LongICRS", "LatICRS"]
+
         for index, log in enumerate(self.results['IMFIT_logs_norm']):
             try:
                 row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+                if not np.isfinite(
+                    row[required_fit_fields].astype(float)
+                ).all():
+                    continue
                 norm_data['Imfit_Flux'][index] = row['I']
                 norm_data['Imfit_Flux_err'][index] = row['Ierr']
                 norm_data['Peak_Intensity'][index] = row['Peak']
@@ -825,6 +882,10 @@ class BatchImfitter:
             for index, log in enumerate(self.results['IMFIT_logs_rbm05']):
                 try:
                     row = log.iloc[0] # pipeline中默认当成单源处理，取第一行
+                    if not np.isfinite(
+                        row[required_fit_fields].astype(float)
+                    ).all():
+                        continue
                     rbm05_data['Imfit_Flux'][index] = row['I']
                     rbm05_data['Imfit_Flux_err'][index] = row['Ierr']
                     rbm05_data['Peak_Intensity'][index] = row['Peak']
